@@ -87,9 +87,84 @@ def init_db():
         account_num TEXT,
         account_label TEXT,
         account_balance REAL,
+        my_category TEXT,
         UNIQUE(date_op, label, amount, account_num)
     );
+
+    CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY,
+        nom TEXT NOT NULL UNIQUE
+    );
+
+    CREATE TABLE IF NOT EXISTS categorization_rules (
+        id INTEGER PRIMARY KEY,
+        keyword TEXT NOT NULL,
+        category TEXT NOT NULL,
+        UNIQUE(keyword)
+    );
+
+    CREATE TABLE IF NOT EXISTS supplier_categories (
+        supplier TEXT PRIMARY KEY,
+        category TEXT NOT NULL
+    );
     """)
+
+    # Migration: add my_category to existing transactions table
+    try:
+        c.execute("ALTER TABLE transactions ADD COLUMN my_category TEXT")
+    except Exception:
+        pass
+
+    c.execute("SELECT COUNT(*) FROM categories")
+    if c.fetchone()[0] == 0:
+        cats = [
+            "Alimentation", "Restaurants", "Transport", "Auto/Moto", "Logement",
+            "Maison", "Santé", "Abonnements", "Loisirs", "Shopping", "Habillement",
+            "Épargne", "Revenus", "Virements internes", "Virements",
+            "Impôts & Charges", "Divers",
+        ]
+        c.executemany("INSERT INTO categories (nom) VALUES (?)", [(n,) for n in cats])
+
+    c.execute("SELECT COUNT(*) FROM categorization_rules")
+    if c.fetchone()[0] == 0:
+        rules = [
+            ("carrefour", "Alimentation"), ("leclerc", "Alimentation"),
+            ("lidl", "Alimentation"), ("aldi", "Alimentation"),
+            ("intermarche", "Alimentation"), ("monoprix", "Alimentation"),
+            ("casino", "Alimentation"), ("franprix", "Alimentation"),
+            ("super u", "Alimentation"), ("biocoop", "Alimentation"),
+            ("picard", "Alimentation"), ("metro", "Alimentation"),
+            ("edf", "Logement"), ("engie", "Logement"),
+            ("loyer", "Logement"), ("veolia", "Logement"),
+            ("eau", "Logement"), ("charges", "Logement"),
+            ("syndic", "Logement"), ("assurance", "Logement"),
+            ("orange", "Abonnements"), ("sfr", "Abonnements"),
+            ("bouygues", "Abonnements"), ("free", "Abonnements"),
+            ("netflix", "Abonnements"), ("spotify", "Abonnements"),
+            ("amazon prime", "Abonnements"), ("disney", "Abonnements"),
+            ("canal+", "Abonnements"), ("deezer", "Abonnements"),
+            ("sncf", "Transport"), ("ratp", "Transport"),
+            ("uber", "Transport"), ("blablacar", "Transport"),
+            ("ouigo", "Transport"), ("transilien", "Transport"),
+            ("total", "Auto/Moto"), ("bp ", "Auto/Moto"),
+            ("shell", "Auto/Moto"), ("esso", "Auto/Moto"),
+            ("pharmacie", "Santé"), ("cpam", "Santé"),
+            ("medecin", "Santé"), ("hopital", "Santé"),
+            ("laboratoire", "Santé"), ("dentiste", "Santé"),
+            ("restaurant", "Restaurants"), ("mcdonald", "Restaurants"),
+            ("burger king", "Restaurants"), ("pizza", "Restaurants"),
+            ("kebab", "Restaurants"), ("brasserie", "Restaurants"),
+            ("amazon", "Shopping"), ("cdiscount", "Shopping"),
+            ("fnac", "Loisirs"), ("decathlon", "Loisirs"),
+            ("cinema", "Loisirs"), ("theatre", "Loisirs"),
+            ("leroy merlin", "Maison"), ("ikea", "Maison"),
+            ("brico depot", "Maison"), ("castorama", "Maison"),
+            ("urssaf", "Impôts & Charges"), ("impot", "Impôts & Charges"),
+            ("tresor public", "Impôts & Charges"),
+            ("zara", "Habillement"), ("h&m", "Habillement"),
+            ("primark", "Habillement"), ("uniqlo", "Habillement"),
+        ]
+        c.executemany("INSERT OR IGNORE INTO categorization_rules (keyword, category) VALUES (?,?)", rules)
 
     c.execute("SELECT COUNT(*) FROM supports")
     if c.fetchone()[0] == 0:

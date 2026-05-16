@@ -1,20 +1,33 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch, fmt, MOIS } from '../api/client.js'
 import { useToast } from '../components/Toast.jsx'
 
 const now = new Date()
+
+function shortLabel(label) {
+  return (label.split('|')[0] || label).trim()
+}
 
 export function DepensesTab() {
   const showToast = useToast()
   const [annee, setAnnee] = useState(now.getFullYear())
   const [mois, setMois] = useState(now.getMonth() + 1)
   const [transactions, setTransactions] = useState([])
+  const [categories, setCategories] = useState([])
+  const [rules, setRules] = useState([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [editingCat, setEditingCat] = useState(null)
+  const [editCatVal, setEditCatVal] = useState('')
+  const [catFilter, setCatFilter] = useState('')
+  const [showRules, setShowRules] = useState(false)
+  const [newKeyword, setNewKeyword] = useState('')
+  const [newRuleCat, setNewRuleCat] = useState('')
+  const [recategorizing, setRecategorizing] = useState(false)
   const fileRef = useRef()
 
-  const load = async () => {
+  const loadTransactions = useCallback(async () => {
     setLoading(true)
     try {
       const data = await apiFetch(`/api/transactions?annee=${annee}&mois=${mois}`)
@@ -24,9 +37,22 @@ export function DepensesTab() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [annee, mois])
 
-  useEffect(() => { load() }, [annee, mois])
+  const loadMeta = useCallback(async () => {
+    try {
+      const [cats, rls] = await Promise.all([
+        apiFetch('/api/categories'),
+        apiFetch('/api/categorization-rules'),
+      ])
+      setCategories(cats)
+      setRules(rls)
+      if (cats.length > 0 && !newRuleCat) setNewRuleCat(cats[0])
+    } catch {}
+  }, [])
+
+  useEffect(() => { loadTransactions() }, [loadTransactions])
+  useEffect(() => { loadMeta() }, [loadMeta])
 
   function changeMonth(delta) {
     setMois(prev => {
@@ -36,6 +62,7 @@ export function DepensesTab() {
       return m
     })
     setImportResult(null)
+    setCatFilter('')
   }
 
   async function handleFileChange(e) {
@@ -51,12 +78,12 @@ export function DepensesTab() {
         credentials: 'include',
         body: form,
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) throw new Error()
       const result = await res.json()
       setImportResult(result)
       if (result.inserted > 0) {
         showToast(`${result.inserted} transaction(s) importée(s)`, 'success')
-        load()
+        loadTransactions()
       } else {
         showToast('Aucune nouvelle transaction', 'info')
       }
@@ -68,19 +95,86 @@ export function DepensesTab() {
     }
   }
 
-  const totalDepenses = transactions.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0)
-  const totalEntrees = transactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+  function startEditCat(t) {
+    setEditingCat(t.id)
+    setEditCatVal(t.my_category || (categories[0] || ''))
+  }
 
-  const byCategory = {}
+  async function saveCat(t) {
+    try {
+      await apiFetch(`/api/transactions/${t.id}/category`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: editCatVal }),
+      })
+      setTransactions(prev => prev.map(tx =>
+        tx.id === t.id ? { ...tx, my_category: editCatVal } : tx
+      ))
+      setEditingCat(null)
+      showToast('Catégorie enregistrée', 'success')
+    } catch {
+      showToast('Erreur', 'error')
+    }
+  }
+
+  async function handleRecategorize() {
+    setRecategorizing(true)
+    try {
+      await apiFetch('/api/transactions/recategorize', { method: 'POST' })
+      showToast('Recatégorisation terminée', 'success')
+      loadTransactions()
+    } catch {
+      showToast('Erreur', 'error')
+    } finally {
+      setRecategorizing(false)
+    }
+  }
+
+  async function addRule(e) {
+    e.preventDefault()
+    if (!newKeyword.trim() || !newRuleCat) return
+    try {
+      await apiFetch('/api/categorization-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: newKeyword.trim(), category: newRuleCat }),
+      })
+      setNewKeyword('')
+      loadMeta()
+      showToast('Règle ajoutée', 'success')
+    } catch {
+      showToast('Erreur', 'error')
+    }
+  }
+
+  async function deleteRule(id) {
+    try {
+      await apiFetch(`/api/categorization-rules/${id}`, { method: 'DELETE' })
+      loadMeta()
+    } catch {
+      showToast('Erreur', 'error')
+    }
+  }
+
+  const filtered = catFilter
+    ? transactions.filter(t => t.my_category === catFilter)
+    : transactions
+
+  const totalDepenses = filtered.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0)
+  const totalEntrees = filtered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+
+  const byCat = {}
   for (const t of transactions) {
     if (t.amount >= 0) continue
-    const cat = t.category_parent || t.category || 'Non catégorisé'
-    byCategory[cat] = (byCategory[cat] || 0) + t.amount
+    const cat = t.my_category || '—'
+    byCat[cat] = (byCat[cat] || 0) + t.amount
   }
-  const categories = Object.entries(byCategory).sort((a, b) => a[1] - b[1])
+  const catBreakdown = Object.entries(byCat).sort((a, b) => a[1] - b[1])
+  const usedCats = [...new Set(transactions.map(t => t.my_category).filter(Boolean))]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
       {/* Month nav + import */}
       <div className="card">
         <div className="month-nav">
@@ -117,7 +211,7 @@ export function DepensesTab() {
       {!loading && transactions.length > 0 && (
         <div className="card">
           <p className="card-title">Résumé — {MOIS[mois]} {annee}</p>
-          <div className="summary-grid" style={{ marginBottom: 12 }}>
+          <div className="summary-grid">
             <div className="summary-card red">
               <div className="label">Dépenses</div>
               <div className="value">{fmt(totalDepenses)}</div>
@@ -128,12 +222,13 @@ export function DepensesTab() {
             </div>
           </div>
 
-          {categories.length > 0 && (
+          {catBreakdown.length > 0 && (
             <>
-              <p className="card-title" style={{ fontSize: 13, marginBottom: 6 }}>Par catégorie</p>
+              <p className="card-title" style={{ fontSize: 12, marginBottom: 8 }}>Par catégorie</p>
               <ul className="transfer-list" style={{ fontSize: 13 }}>
-                {categories.map(([cat, total]) => (
-                  <li key={cat}>
+                {catBreakdown.map(([cat, total]) => (
+                  <li key={cat} onClick={() => setCatFilter(catFilter === cat ? '' : cat)}
+                      style={{ cursor: 'pointer', background: catFilter === cat ? '#f0fdf4' : 'transparent', margin: '0 -4px', padding: '8px 4px', borderRadius: 6 }}>
                     <span className="transfer-name">{cat}</span>
                     <span className="transfer-amount negative">{fmt(total)}</span>
                   </li>
@@ -146,35 +241,128 @@ export function DepensesTab() {
 
       {/* Transaction list */}
       <div className="card">
-        <p className="card-title">
-          Mouvements
-          {transactions.length > 0 && <span style={{ fontWeight: 400, color: '#888', marginLeft: 6 }}>({transactions.length})</span>}
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <p className="card-title" style={{ margin: 0 }}>
+            Mouvements
+            {transactions.length > 0 && <span style={{ fontWeight: 400, color: '#888', marginLeft: 6 }}>({filtered.length})</span>}
+          </p>
+          {catFilter && (
+            <button className="cat-chip active" onClick={() => setCatFilter('')} style={{ fontSize: 11 }}>
+              {catFilter} ✕
+            </button>
+          )}
+        </div>
+
+        {/* Category filter chips */}
+        {usedCats.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 10, marginBottom: 4 }}>
+            <button className={`cat-chip${!catFilter ? ' active' : ''}`} onClick={() => setCatFilter('')}>Tout</button>
+            {usedCats.map(c => (
+              <button key={c} className={`cat-chip${catFilter === c ? ' active' : ''}`} onClick={() => setCatFilter(catFilter === c ? '' : c)}>
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading && <p style={{ textAlign: 'center', color: '#888' }}>Chargement…</p>}
         {!loading && transactions.length === 0 && (
           <p style={{ textAlign: 'center', color: '#888', fontSize: 14 }}>
             Aucun mouvement pour ce mois.<br />Importez un CSV pour commencer.
           </p>
         )}
-        {!loading && transactions.length > 0 && (
+        {!loading && filtered.length > 0 && (
           <ul className="transfer-list">
-            {transactions.map(t => (
-              <li key={t.id} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '8px 0' }}>
+            {filtered.map(t => (
+              <li key={t.id} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '10px 0' }}>
                 <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8 }}>
-                  <span className="transfer-name" style={{ flex: 1, fontSize: 13 }}>{t.label.split('|')[0].trim()}</span>
-                  <span className={`transfer-amount ${t.amount >= 0 ? 'positive' : 'negative'}`} style={{ fontWeight: 600 }}>
+                  <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{shortLabel(t.label)}</span>
+                  <span className={`transfer-amount ${t.amount >= 0 ? 'positive' : 'negative'}`}>
                     {fmt(t.amount)}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#888' }}>
-                  <span>{t.date_op}</span>
-                  {t.category_parent && t.category_parent !== 'Non catégorisé' && (
-                    <span>· {t.category_parent}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: '#888' }}>{t.date_op}</span>
+                  {editingCat === t.id ? (
+                    <>
+                      <select
+                        value={editCatVal}
+                        onChange={e => setEditCatVal(e.target.value)}
+                        style={{ fontSize: 12, padding: '2px 6px', width: 'auto', height: 26, borderRadius: 6 }}
+                      >
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <button onClick={() => saveCat(t)} className="cat-chip active" style={{ padding: '2px 8px' }}>✓</button>
+                      <button onClick={() => setEditingCat(null)} className="cat-chip" style={{ padding: '2px 8px' }}>✕</button>
+                    </>
+                  ) : (
+                    <span className={`cat-badge${t.my_category ? '' : ' cat-badge-empty'}`} onClick={() => startEditCat(t)}>
+                      {t.my_category || 'Catégoriser'} ▾
+                    </span>
                   )}
                 </div>
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      {/* Rules section */}
+      <div className="card">
+        <button
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          onClick={() => setShowRules(v => !v)}
+        >
+          <p className="card-title" style={{ margin: 0 }}>Règles de catégorisation</p>
+          <span style={{ color: '#888', fontSize: 18 }}>{showRules ? '▲' : '▼'}</span>
+        </button>
+
+        {showRules && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button
+                className="btn btn-outline btn-sm"
+                style={{ flex: 1 }}
+                onClick={handleRecategorize}
+                disabled={recategorizing}
+              >
+                {recategorizing ? 'En cours…' : '↺ Recatégoriser tout'}
+              </button>
+            </div>
+
+            <form onSubmit={addRule} style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              <input
+                placeholder="Mot-clé (ex: carrefour)"
+                value={newKeyword}
+                onChange={e => setNewKeyword(e.target.value)}
+                style={{ flex: 1, padding: '8px 10px', fontSize: 13, height: 36 }}
+              />
+              <select
+                value={newRuleCat}
+                onChange={e => setNewRuleCat(e.target.value)}
+                style={{ width: 130, fontSize: 13, height: 36, padding: '0 6px' }}
+              >
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button type="submit" className="btn btn-primary btn-sm" style={{ height: 36, padding: '0 14px' }}>+</button>
+            </form>
+
+            {rules.length > 0 && (
+              <ul className="transfer-list" style={{ fontSize: 13 }}>
+                {rules.map(r => (
+                  <li key={r.id}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 12, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{r.keyword}</span>
+                    <span style={{ flex: 1, marginLeft: 8, color: '#555' }}>→ {r.category}</span>
+                    <button
+                      onClick={() => deleteRule(r.id)}
+                      className="btn btn-danger btn-sm"
+                      style={{ padding: '2px 8px', fontSize: 12 }}
+                    >✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     </div>

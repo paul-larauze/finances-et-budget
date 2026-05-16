@@ -393,8 +393,56 @@ def get_graphes_evolution():
 
 # ── TRANSACTIONS ───────────────────────────────────────────────────────────────
 
+BOURSOBANK_MAP = {
+    "Alimentation": "Alimentation",
+    "Restaurants, bars, discothèques…": "Restaurants",
+    "Loisirs et sorties": "Loisirs",
+    "Dépenses Jeux et paris": "Loisirs",
+    "Auto & Moto": "Auto/Moto",
+    "Péages": "Transport",
+    "Santé": "Santé",
+    "Médecins et frais médicaux": "Santé",
+    "Pharmacie et laboratoire": "Santé",
+    "Remboursements frais de santé": "Santé",
+    "Abonnements & téléphonie": "Abonnements",
+    "Bricolage et jardinage": "Maison",
+    "Mobilier, électroménager, décoration…": "Maison",
+    "Electronique et informatique": "Shopping",
+    "Livres, CD/DVD, bijoux, jouets…": "Shopping",
+    "Vêtements et accessoires": "Habillement",
+    "Impôts & Taxes": "Impôts & Charges",
+    "Urssaf et charges patronales": "Impôts & Charges",
+    "Virements reçus": "Revenus",
+    "Virements émis": "Virements",
+    "Virements reçus de comptes à comptes": "Virements internes",
+    "Virements émis de comptes à comptes": "Virements internes",
+    "Mouvements internes créditeurs": "Virements internes",
+    "Mouvements internes débiteurs": "Virements internes",
+}
+
+
+def _categorize(supplier, label, category_parent, conn):
+    if supplier:
+        row = conn.execute(
+            "SELECT category FROM supplier_categories WHERE supplier=?",
+            (supplier.lower().strip(),),
+        ).fetchone()
+        if row:
+            return row["category"]
+
+    text = ((label or "") + " " + (supplier or "")).lower()
+    rules = conn.execute(
+        "SELECT keyword, category FROM categorization_rules ORDER BY id"
+    ).fetchall()
+    for rule in rules:
+        if rule["keyword"] in text:
+            return rule["category"]
+
+    return BOURSOBANK_MAP.get(category_parent)
+
+
 def _parse_french_amount(s):
-    return float(s.strip().strip('"').replace(' ', '').replace('\xa0', '').replace(' ', '').replace(',', '.'))
+    return float(s.strip().strip('"').replace(' ', '').replace('\xa0', '').replace(' ', '').replace(' ', '').replace(',', '.'))
 
 
 @app.route("/api/transactions", methods=["GET"])
@@ -440,22 +488,27 @@ def import_transactions():
             amount = _parse_french_amount(row.get("amount", "0"))
             balance_raw = row.get("accountbalance", "").strip()
             balance = _parse_french_amount(balance_raw) if balance_raw else None
+            supplier = row.get("supplierFound", "").strip() or None
+            cat_parent = row.get("categoryParent", "").strip() or None
+            label = row.get("label", "").strip()
+            my_cat = _categorize(supplier, label, cat_parent, conn)
             result = conn.execute(
                 "INSERT OR IGNORE INTO transactions "
-                "(date_op, date_val, label, category, category_parent, supplier, amount, comment, account_num, account_label, account_balance) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "(date_op, date_val, label, category, category_parent, supplier, amount, comment, account_num, account_label, account_balance, my_category) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     row.get("dateOp", "").strip(),
                     row.get("dateVal", "").strip(),
-                    row.get("label", "").strip(),
+                    label,
                     row.get("category", "").strip() or None,
-                    row.get("categoryParent", "").strip() or None,
-                    row.get("supplierFound", "").strip() or None,
+                    cat_parent,
+                    supplier,
                     amount,
                     row.get("comment", "").strip() or None,
                     row.get("accountNum", "").strip() or None,
                     row.get("accountLabel", "").strip() or None,
                     balance,
+                    my_cat,
                 ),
             )
             if result.rowcount:
@@ -468,6 +521,80 @@ def import_transactions():
     conn.commit()
     conn.close()
     return jsonify({"inserted": inserted, "skipped": skipped, "errors": errors})
+
+
+@app.route("/api/transactions/<int:tid>/category", methods=["PATCH"])
+@login_required
+def update_transaction_category(tid):
+    data = request.json
+    category = data.get("category")
+    conn = get_db()
+    conn.execute("UPDATE transactions SET my_category=? WHERE id=?", (category, tid))
+    tx = conn.execute("SELECT supplier FROM transactions WHERE id=?", (tid,)).fetchone()
+    if tx and tx["supplier"]:
+        conn.execute(
+            "INSERT OR REPLACE INTO supplier_categories (supplier, category) VALUES (?,?)",
+            (tx["supplier"].lower().strip(), category),
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/transactions/recategorize", methods=["POST"])
+@login_required
+def recategorize_all():
+    conn = get_db()
+    txs = conn.execute("SELECT id, supplier, label, category_parent FROM transactions").fetchall()
+    for tx in txs:
+        cat = _categorize(tx["supplier"], tx["label"], tx["category_parent"], conn)
+        if cat:
+            conn.execute("UPDATE transactions SET my_category=? WHERE id=?", (cat, tx["id"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/categories", methods=["GET"])
+@login_required
+def get_categories():
+    conn = get_db()
+    rows = conn.execute("SELECT nom FROM categories ORDER BY id").fetchall()
+    conn.close()
+    return jsonify([r["nom"] for r in rows])
+
+
+@app.route("/api/categorization-rules", methods=["GET"])
+@login_required
+def get_rules():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM categorization_rules ORDER BY id").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/categorization-rules", methods=["POST"])
+@login_required
+def add_rule():
+    data = request.json
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO categorization_rules (keyword, category) VALUES (?,?)",
+        (data["keyword"].lower().strip(), data["category"]),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/categorization-rules/<int:rid>", methods=["DELETE"])
+@login_required
+def delete_rule(rid):
+    conn = get_db()
+    conn.execute("DELETE FROM categorization_rules WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
 
 
 # ── EXPORT / IMPORT ────────────────────────────────────────────────────────────
