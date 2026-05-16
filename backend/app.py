@@ -523,6 +523,16 @@ def import_transactions():
     return jsonify({"inserted": inserted, "skipped": skipped, "errors": errors})
 
 
+@app.route("/api/transactions/<int:tid>", methods=["DELETE"])
+@login_required
+def delete_transaction(tid):
+    conn = get_db()
+    conn.execute("DELETE FROM transactions WHERE id=?", (tid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/transactions/<int:tid>/category", methods=["PATCH"])
 @login_required
 def update_transaction_category(tid):

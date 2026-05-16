@@ -21,6 +21,7 @@ export function DepensesTab() {
   const [editingCat, setEditingCat] = useState(null)
   const [editCatVal, setEditCatVal] = useState('')
   const [catFilter, setCatFilter] = useState('')
+  const [amountFilter, setAmountFilter] = useState('')
   const [showRules, setShowRules] = useState(false)
   const [newKeyword, setNewKeyword] = useState('')
   const [newRuleCat, setNewRuleCat] = useState('')
@@ -63,6 +64,16 @@ export function DepensesTab() {
     })
     setImportResult(null)
     setCatFilter('')
+    setAmountFilter('')
+  }
+
+  async function deleteTransaction(id) {
+    try {
+      await apiFetch(`/api/transactions/${id}`, { method: 'DELETE' })
+      setTransactions(prev => prev.filter(t => t.id !== id))
+    } catch {
+      showToast('Erreur lors de la suppression', 'error')
+    }
   }
 
   async function handleFileChange(e) {
@@ -156,9 +167,16 @@ export function DepensesTab() {
     }
   }
 
-  const filtered = catFilter
-    ? transactions.filter(t => t.my_category === catFilter)
-    : transactions
+  const filtered = transactions.filter(t => {
+    if (catFilter && t.my_category !== catFilter) return false
+    if (amountFilter) {
+      const needle = amountFilter.replace(',', '.').replace(/\s/g, '')
+      const abs = String(Math.abs(t.amount)).replace('.', ',')
+      const absStr = String(Math.abs(t.amount))
+      if (!abs.startsWith(needle.replace('.', ',')) && !absStr.startsWith(needle)) return false
+    }
+    return true
+  })
 
   const totalDepenses = filtered.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0)
   const totalEntrees = filtered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
@@ -253,6 +271,24 @@ export function DepensesTab() {
           )}
         </div>
 
+        {/* Amount filter */}
+        <div style={{ marginBottom: 10 }}>
+          <div className="input-suffix">
+            <input
+              type="number"
+              min="0"
+              step="any"
+              placeholder="Filtrer par montant…"
+              value={amountFilter}
+              onChange={e => setAmountFilter(e.target.value)}
+              style={{ fontSize: 14, padding: '8px 36px 8px 12px' }}
+            />
+            {amountFilter && (
+              <span style={{ cursor: 'pointer', color: '#888' }} onClick={() => setAmountFilter('')}>✕</span>
+            )}
+          </div>
+        </div>
+
         {/* Category filter chips */}
         {usedCats.length > 0 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 10, marginBottom: 4 }}>
@@ -280,6 +316,11 @@ export function DepensesTab() {
                   <span className={`transfer-amount ${t.amount >= 0 ? 'positive' : 'negative'}`}>
                     {fmt(t.amount)}
                   </span>
+                  <button
+                    onClick={() => deleteTransaction(t.id)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#cbd5e1', fontSize: 16, padding: '0 2px', lineHeight: 1 }}
+                    title="Supprimer"
+                  >🗑</button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 11, color: '#888' }}>{t.date_op}</span>
