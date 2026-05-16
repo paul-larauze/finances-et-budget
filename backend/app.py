@@ -450,16 +450,18 @@ def _parse_french_amount(s):
 def get_transactions():
     annee = request.args.get("annee", type=int)
     mois = request.args.get("mois", type=int)
+    account_type = request.args.get("account_type", "perso")
     conn = get_db()
     if annee and mois:
         prefix = f"{annee}-{mois:02d}"
         rows = conn.execute(
-            "SELECT * FROM transactions WHERE date_op LIKE ? ORDER BY date_op DESC, id DESC",
-            (f"{prefix}%",),
+            "SELECT * FROM transactions WHERE date_op LIKE ? AND account_type=? ORDER BY date_op DESC, id DESC",
+            (f"{prefix}%", account_type),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM transactions ORDER BY date_op DESC, id DESC LIMIT 500"
+            "SELECT * FROM transactions WHERE account_type=? ORDER BY date_op DESC, id DESC LIMIT 500",
+            (account_type,),
         ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -474,6 +476,8 @@ def import_transactions():
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "Fichier manquant"}), 400
+
+    account_type = request.form.get("account_type", "perso")
 
     content = file.read().decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(content), delimiter=";")
@@ -494,8 +498,8 @@ def import_transactions():
             my_cat = _categorize(supplier, label, cat_parent, conn)
             result = conn.execute(
                 "INSERT OR IGNORE INTO transactions "
-                "(date_op, date_val, label, category, category_parent, supplier, amount, comment, account_num, account_label, account_balance, my_category) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(date_op, date_val, label, category, category_parent, supplier, amount, comment, account_num, account_label, account_balance, my_category, account_type) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     row.get("dateOp", "").strip(),
                     row.get("dateVal", "").strip(),
@@ -509,6 +513,7 @@ def import_transactions():
                     row.get("accountLabel", "").strip() or None,
                     balance,
                     my_cat,
+                    account_type,
                 ),
             )
             if result.rowcount:

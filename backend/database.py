@@ -88,6 +88,7 @@ def init_db():
         account_label TEXT,
         account_balance REAL,
         my_category TEXT,
+        account_type TEXT DEFAULT 'perso',
         UNIQUE(date_op, label, amount, account_num)
     );
 
@@ -109,11 +110,14 @@ def init_db():
     );
     """)
 
-    # Migration: add my_category to existing transactions table
-    try:
-        c.execute("ALTER TABLE transactions ADD COLUMN my_category TEXT")
-    except Exception:
-        pass
+    for migration in [
+        "ALTER TABLE transactions ADD COLUMN my_category TEXT",
+        "ALTER TABLE transactions ADD COLUMN account_type TEXT DEFAULT 'perso'",
+    ]:
+        try:
+            c.execute(migration)
+        except Exception:
+            pass
 
     c.execute("SELECT COUNT(*) FROM categories")
     if c.fetchone()[0] == 0:

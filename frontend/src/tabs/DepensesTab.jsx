@@ -15,6 +15,7 @@ export function DepensesTab() {
   const [transactions, setTransactions] = useState([])
   const [categories, setCategories] = useState([])
   const [rules, setRules] = useState([])
+  const [accountType, setAccountType] = useState('perso')
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
@@ -31,14 +32,14 @@ export function DepensesTab() {
   const loadTransactions = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await apiFetch(`/api/transactions?annee=${annee}&mois=${mois}`)
+      const data = await apiFetch(`/api/transactions?annee=${annee}&mois=${mois}&account_type=${accountType}`)
       setTransactions(data)
     } catch {
       showToast('Erreur de chargement', 'error')
     } finally {
       setLoading(false)
     }
-  }, [annee, mois])
+  }, [annee, mois, accountType])
 
   const loadMeta = useCallback(async () => {
     try {
@@ -84,6 +85,7 @@ export function DepensesTab() {
     try {
       const form = new FormData()
       form.append('file', file)
+      form.append('account_type', accountType)
       const res = await fetch('/api/transactions/import', {
         method: 'POST',
         credentials: 'include',
@@ -192,6 +194,24 @@ export function DepensesTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+      {/* Account toggle */}
+      <div style={{ display: 'flex', background: 'white', borderRadius: 12, padding: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', gap: 4 }}>
+        {[{ id: 'perso', label: 'Compte perso' }, { id: 'joint', label: 'Compte joint' }].map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => { setAccountType(id); setCatFilter(''); setAmountFilter(''); setImportResult(null) }}
+            style={{
+              flex: 1, padding: '10px 0', border: 'none', borderRadius: 8, fontWeight: 600,
+              fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
+              background: accountType === id ? 'var(--primary)' : 'transparent',
+              color: accountType === id ? 'white' : 'var(--muted)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* Month nav + import */}
       <div className="card">
