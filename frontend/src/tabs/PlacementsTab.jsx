@@ -42,26 +42,15 @@ export function PlacementsTab() {
     setLoading(true)
     try {
       const data = await apiFetch(`/api/placements?annee=${annee}&mois=${mois}`)
+      const all = [...(data.livrets || []), ...(data.bourse || [])]
       const map = {}
-      for (const p of (data.placements || [])) {
+      const prevMap = {}
+      for (const p of all) {
         map[p.support] = p.montant
+        if (p.prev) prevMap[p.support] = p.prev
       }
       setValues(map)
-
-      // Previous month
-      let prevAnnee = annee
-      let prevMois = mois - 1
-      if (prevMois === 0) { prevMois = 12; prevAnnee -= 1 }
-      try {
-        const prev = await apiFetch(`/api/placements?annee=${prevAnnee}&mois=${prevMois}`)
-        const prevMap = {}
-        for (const p of (prev.placements || [])) {
-          prevMap[p.support] = p.montant
-        }
-        setPrevValues(prevMap)
-      } catch {
-        setPrevValues({})
-      }
+      setPrevValues(prevMap)
     } catch {
       setValues({})
       setPrevValues({})

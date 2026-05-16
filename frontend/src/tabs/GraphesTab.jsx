@@ -100,26 +100,22 @@ export function GraphesTab() {
     return <p style={{ textAlign: 'center', color: '#888', padding: 32 }}>Aucune donnée.</p>
   }
 
-  const { labels = [], total = [], livrets_total = [], bourse_total = [], livrets_supports = {}, bourse_supports = {} } = data
-
-  // Readable month labels: "Jan 24"
-  const moisLabels = (data.mois_labels || labels).map((l, i) => {
-    if (data.mois_labels) return l
-    // If raw labels are "YYYY-MM" format
-    if (typeof l === 'string' && l.includes('-')) {
-      const [y, m] = l.split('-')
-      return `${MOIS[parseInt(m)]?.slice(0, 3)} ${String(y).slice(2)}`
-    }
-    return l
-  })
+  const {
+    labels = [],
+    totals = [],
+    livrets_totals = [],
+    bourse_totals = [],
+    livrets_supports = [],
+    bourse_supports = [],
+  } = data
 
   /* ─── 1. Patrimoine total ─── */
   const patrimoineData = {
-    labels: moisLabels,
+    labels,
     datasets: [
       {
         label: 'Total',
-        data: total,
+        data: totals,
         borderColor: '#2563eb',
         backgroundColor: 'rgba(37,99,235,0.08)',
         fill: true,
@@ -128,7 +124,7 @@ export function GraphesTab() {
       },
       {
         label: 'Livrets',
-        data: livrets_total,
+        data: livrets_totals,
         borderColor: '#16a34a',
         backgroundColor: 'transparent',
         tension: 0.3,
@@ -136,7 +132,7 @@ export function GraphesTab() {
       },
       {
         label: 'Bourse',
-        data: bourse_total,
+        data: bourse_totals,
         borderColor: '#7c3aed',
         backgroundColor: 'transparent',
         tension: 0.3,
@@ -147,50 +143,33 @@ export function GraphesTab() {
 
   /* ─── 2. Livrets vs Bourse stacked ─── */
   const stackedData = {
-    labels: moisLabels,
+    labels,
     datasets: [
-      {
-        label: 'Livrets',
-        data: livrets_total,
-        backgroundColor: '#16a34a',
-      },
-      {
-        label: 'Bourse',
-        data: bourse_total,
-        backgroundColor: '#2563eb',
-      },
+      { label: 'Livrets', data: livrets_totals, backgroundColor: '#16a34a' },
+      { label: 'Bourse', data: bourse_totals, backgroundColor: '#2563eb' },
     ],
   }
 
   /* ─── 3. Répartition actuelle (last month) ─── */
-  const lastIdx = total.length - 1
-  const allSupports = { ...livrets_supports, ...bourse_supports }
-  const doughnutLabels = Object.keys(allSupports)
-  const doughnutValues = doughnutLabels.map(name => {
-    const series = allSupports[name]
-    return series[lastIdx] ?? 0
-  })
-  const doughnutColors = doughnutLabels.map((name, i) => {
-    const isLivret = name in livrets_supports
-    const palette = isLivret ? PALETTE_LIVRETS : PALETTE_BOURSE
-    return palette[i % palette.length]
+  const lastIdx = totals.length - 1
+  const allSupports = [...livrets_supports, ...bourse_supports]
+  const doughnutLabels = allSupports.map(s => s.support)
+  const doughnutValues = allSupports.map(s => s.data[lastIdx] ?? 0)
+  const doughnutColors = allSupports.map((s, i) => {
+    const isLivret = livrets_supports.includes(s)
+    return (isLivret ? PALETTE_LIVRETS : PALETTE_BOURSE)[i % (isLivret ? PALETTE_LIVRETS : PALETTE_BOURSE).length]
   })
   const doughnutData = {
     labels: doughnutLabels,
-    datasets: [{
-      data: doughnutValues,
-      backgroundColor: doughnutColors,
-      borderWidth: 2,
-    }],
+    datasets: [{ data: doughnutValues, backgroundColor: doughnutColors, borderWidth: 2 }],
   }
 
   /* ─── 4. Évolution livrets per support ─── */
-  const livretsSupportNames = Object.keys(livrets_supports)
   const livretsEvolutionData = {
-    labels: moisLabels,
-    datasets: livretsSupportNames.map((name, i) => ({
-      label: name,
-      data: livrets_supports[name],
+    labels,
+    datasets: livrets_supports.map((s, i) => ({
+      label: s.support,
+      data: s.data,
       borderColor: PALETTE_LIVRETS[i % PALETTE_LIVRETS.length],
       backgroundColor: 'transparent',
       tension: 0.3,
@@ -199,12 +178,11 @@ export function GraphesTab() {
   }
 
   /* ─── 5. Évolution bourse per support ─── */
-  const bourseSupportNames = Object.keys(bourse_supports)
   const bourseEvolutionData = {
-    labels: moisLabels,
-    datasets: bourseSupportNames.map((name, i) => ({
-      label: name,
-      data: bourse_supports[name],
+    labels,
+    datasets: bourse_supports.map((s, i) => ({
+      label: s.support,
+      data: s.data,
       borderColor: PALETTE_BOURSE[i % PALETTE_BOURSE.length],
       backgroundColor: 'transparent',
       tension: 0.3,
@@ -212,7 +190,7 @@ export function GraphesTab() {
     })),
   }
 
-  const hasData = total.length > 0
+  const hasData = totals.length > 0
 
   if (!hasData) {
     return (
@@ -242,13 +220,13 @@ export function GraphesTab() {
         )}
       </ChartCard>
 
-      {livretsSupportNames.length > 0 && (
+      {livrets_supports.length > 0 && (
         <ChartCard title="Évolution livrets">
           <Line data={livretsEvolutionData} options={LINE_OPTIONS} />
         </ChartCard>
       )}
 
-      {bourseSupportNames.length > 0 && (
+      {bourse_supports.length > 0 && (
         <ChartCard title="Évolution bourse & épargne">
           <Line data={bourseEvolutionData} options={LINE_OPTIONS} />
         </ChartCard>

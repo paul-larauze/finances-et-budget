@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify, session, redirect, url_for
 from flask_cors import CORS
 from database import init_db, get_db
 
-app = Flask(__name__, static_folder="../frontend/dist", static_url_path="/")
+app = Flask(__name__, static_folder="static", static_url_path="/")
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
 CORS(app, supports_credentials=True)
 init_db()

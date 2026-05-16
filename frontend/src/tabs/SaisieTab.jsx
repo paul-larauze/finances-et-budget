@@ -18,14 +18,8 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
 
   const totalPct = PLACEMENTS_KEYS.reduce((s, k) => s + (repartition[k] || 0), 0)
 
-  // Fixed charges total (prélèvements + virements fixes négatifs)
-  const totalFixes = [
-    ...(prelevementsData || []),
-    ...(virementsFixesData || []).filter(v => v.montant < 0),
-  ].reduce((s, item) => {
-    if (item.mois_specifique && item.mois_specifique !== mois) return s
-    return s + Math.abs(item.montant || 0)
-  }, 0)
+  // Virements fixes déduits du disponible (tous positifs, pas les prélèvements)
+  const totalFixes = (virementsFixesData || []).reduce((s, v) => s + (v.montant || 0), 0)
 
   const aaPlacer = Math.max(0, (parseFloat(salaire) || 0) - totalFixes)
 
@@ -99,12 +93,9 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
   // Compute virements list for step 3
   const virementsList = (() => {
     const list = []
-    // Fixed transfers filtered for this month
     for (const v of (virementsFixesData || [])) {
-      if (v.mois_specifique && v.mois_specifique !== mois) continue
       list.push({ libelle: v.libelle, banque: v.banque, montant: v.montant })
     }
-    // Placement allocations
     const s = parseFloat(salaire) || 0
     const placeable = Math.max(0, s - totalFixes)
     for (const key of PLACEMENTS_KEYS) {
@@ -154,16 +145,17 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
         <div>
           <p className="card-title">Étape 1 — Salaire du mois</p>
           <div className="input-group">
-            <input
-              type="number"
-              min="0"
-              step="10"
-              placeholder="Salaire net"
-              value={salaire}
-              onChange={e => setSalaire(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <span className="input-suffix">€</span>
+            <div className="input-suffix">
+              <input
+                type="number"
+                min="0"
+                step="10"
+                placeholder="Salaire net"
+                value={salaire}
+                onChange={e => setSalaire(e.target.value)}
+              />
+              <span>€</span>
+            </div>
           </div>
           <button className="btn btn-primary" style={{ width: '100%', marginTop: 16 }} onClick={goStep2}>
             Suivant →
