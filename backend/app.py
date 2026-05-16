@@ -445,6 +445,94 @@ def _parse_french_amount(s):
     return float(s.strip().strip('"').replace(' ', '').replace('\xa0', '').replace(' ', '').replace(' ', '').replace(',', '.'))
 
 
+EXCLUDED_FROM_REPORT = ('Virements internes', 'Virements', 'Revenus', 'Épargne')
+
+
+@app.route("/api/transactions/rapport", methods=["GET"])
+@login_required
+def get_rapport():
+    from datetime import date
+    account_type = request.args.get("account_type", "perso")
+    months = request.args.get("months", 6, type=int)
+
+    today = date.today()
+    m = today.month - months
+    y = today.year
+    while m <= 0:
+        m += 12
+        y -= 1
+    start = f"{y}-{m:02d}-01"
+
+    conn = get_db()
+
+    placeholders = ",".join("?" * len(EXCLUDED_FROM_REPORT))
+    base_params = [account_type, start] + list(EXCLUDED_FROM_REPORT)
+
+    by_cat = conn.execute(f"""
+        SELECT COALESCE(my_category, 'Non catégorisé') as cat,
+               ABS(SUM(amount)) as total, COUNT(*) as cnt
+        FROM transactions
+        WHERE account_type=? AND amount < 0 AND date_op >= ?
+          AND COALESCE(my_category, '') NOT IN ({placeholders})
+        GROUP BY cat ORDER BY total DESC
+    """, base_params).fetchall()
+
+    monthly = conn.execute(f"""
+        SELECT substr(date_op, 1, 7) as month, ABS(SUM(amount)) as total
+        FROM transactions
+        WHERE account_type=? AND amount < 0 AND date_op >= ?
+          AND COALESCE(my_category, '') NOT IN ({placeholders})
+        GROUP BY month ORDER BY month
+    """, base_params).fetchall()
+
+    monthly_by_cat = conn.execute(f"""
+        SELECT substr(date_op, 1, 7) as month,
+               COALESCE(my_category, 'Non catégorisé') as cat,
+               ABS(SUM(amount)) as total
+        FROM transactions
+        WHERE account_type=? AND amount < 0 AND date_op >= ?
+          AND COALESCE(my_category, '') NOT IN ({placeholders})
+        GROUP BY month, cat ORDER BY month, total DESC
+    """, base_params).fetchall()
+
+    conn.close()
+
+    mois_abbr = ["", "Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"]
+    all_months = sorted({r["month"] for r in monthly_by_cat})
+    labels = [f"{mois_abbr[int(m.split('-')[1])]} {m.split('-')[0][2:]}" for m in all_months]
+
+    grand_total = sum(r["total"] for r in by_cat) or 1
+    by_cat_list = [
+        {"category": r["cat"], "total": round(r["total"], 2),
+         "count": r["cnt"], "pct": round(r["total"] / grand_total * 100, 1)}
+        for r in by_cat
+    ]
+
+    # Build top-N categories for evolution (rest = "Autres")
+    TOP_N = 7
+    top_cats = [r["category"] for r in by_cat_list[:TOP_N]]
+    cat_data = {cat: [0.0] * len(all_months) for cat in top_cats}
+    autres_data = [0.0] * len(all_months)
+    month_idx = {m: i for i, m in enumerate(all_months)}
+    for r in monthly_by_cat:
+        i = month_idx[r["month"]]
+        if r["cat"] in cat_data:
+            cat_data[r["cat"]][i] = round(r["total"], 2)
+        else:
+            autres_data[i] = round(autres_data[i] + r["total"], 2)
+
+    monthly_series = [{"category": cat, "data": cat_data[cat]} for cat in top_cats if any(cat_data[cat])]
+    if any(autres_data):
+        monthly_series.append({"category": "Autres", "data": autres_data})
+
+    return jsonify({
+        "labels": labels,
+        "by_category": by_cat_list,
+        "monthly_series": monthly_series,
+        "monthly_totals": [round(r["total"], 2) for r in monthly],
+    })
+
+
 @app.route("/api/transactions", methods=["GET"])
 @login_required
 def get_transactions():

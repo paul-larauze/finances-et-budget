@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch, fmt, MOIS } from '../api/client.js'
 import { useToast } from '../components/Toast.jsx'
+import { RapportDepensesView } from './RapportDepensesView.jsx'
 
 const now = new Date()
 
@@ -16,6 +17,7 @@ export function DepensesTab() {
   const [categories, setCategories] = useState([])
   const [rules, setRules] = useState([])
   const [accountType, setAccountType] = useState('perso')
+  const [view, setView] = useState('mouvements')
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
@@ -55,6 +57,13 @@ export function DepensesTab() {
 
   useEffect(() => { loadTransactions() }, [loadTransactions])
   useEffect(() => { loadMeta() }, [loadMeta])
+
+  function switchAccount(id) {
+    setAccountType(id)
+    setCatFilter('')
+    setAmountFilter('')
+    setImportResult(null)
+  }
 
   function changeMonth(delta) {
     setMois(prev => {
@@ -200,7 +209,7 @@ export function DepensesTab() {
         {[{ id: 'perso', label: 'Compte perso' }, { id: 'joint', label: 'Compte joint' }].map(({ id, label }) => (
           <button
             key={id}
-            onClick={() => { setAccountType(id); setCatFilter(''); setAmountFilter(''); setImportResult(null) }}
+            onClick={() => switchAccount(id)}
             style={{
               flex: 1, padding: '10px 0', border: 'none', borderRadius: 8, fontWeight: 600,
               fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
@@ -212,6 +221,24 @@ export function DepensesTab() {
           </button>
         ))}
       </div>
+
+      {/* View toggle */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {[{ id: 'mouvements', label: '≡ Mouvements' }, { id: 'rapport', label: '📊 Rapport' }].map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setView(id)}
+            className={`cat-chip${view === id ? ' active' : ''}`}
+            style={{ flex: 1, textAlign: 'center', padding: '10px 0', fontSize: 13 }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'rapport' && <RapportDepensesView accountType={accountType} />}
+
+      {view === 'mouvements' && <>
 
       {/* Month nav + import */}
       <div className="card">
@@ -426,6 +453,9 @@ export function DepensesTab() {
           </div>
         )}
       </div>
+
+      </> }
+
     </div>
   )
 }
