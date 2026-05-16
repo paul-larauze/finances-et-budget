@@ -1,0 +1,12 @@
+services:
+  finances-et-budget:
+    build: ./backend
+    container_name: finances-et-budget
+    ports:
+      - "5003:5003"
+    volumes:
+      - /volume1/docker/finances-et-budget/data:/app/data
+    environment:
+      - SECRET_KEY=remplace-par-une-cle-secrete-longue
+      - APP_PASSWORD=remplace-par-ton-mot-de-passe
+    restart: unless-stopped
