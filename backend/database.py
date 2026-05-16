@@ -73,6 +73,22 @@ def init_db():
         montant REAL DEFAULT 0,
         UNIQUE(annee, mois, support)
     );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY,
+        date_op TEXT NOT NULL,
+        date_val TEXT NOT NULL,
+        label TEXT NOT NULL,
+        category TEXT,
+        category_parent TEXT,
+        supplier TEXT,
+        amount REAL NOT NULL,
+        comment TEXT,
+        account_num TEXT,
+        account_label TEXT,
+        account_balance REAL,
+        UNIQUE(date_op, label, amount, account_num)
+    );
     """)
 
     c.execute("SELECT COUNT(*) FROM supports")

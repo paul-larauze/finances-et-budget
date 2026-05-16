@@ -7,6 +7,7 @@ import { AutoTab } from './tabs/AutoTab'
 import { PlacementsTab } from './tabs/PlacementsTab'
 import { HistoriqueTab } from './tabs/HistoriqueTab'
 import { GraphesTab } from './tabs/GraphesTab'
+import { DepensesTab } from './tabs/DepensesTab'
 import { apiFetch } from './api/client'
 
 function LoginPage({ onLogin }) {
@@ -104,6 +105,7 @@ export default function App() {
         {tab === 'placements' && <PlacementsTab />}
         {tab === 'historique' && <HistoriqueTab />}
         {tab === 'graphes' && <GraphesTab />}
+        {tab === 'depenses' && <DepensesTab />}
       </div>
       <BottomNav active={tab} onChange={setTab} />
       <ToastContainer />

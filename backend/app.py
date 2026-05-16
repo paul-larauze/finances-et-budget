@@ -391,6 +391,85 @@ def get_graphes_evolution():
     })
 
 
+# ── TRANSACTIONS ───────────────────────────────────────────────────────────────
+
+def _parse_french_amount(s):
+    return float(s.strip().strip('"').replace(' ', '').replace('\xa0', '').replace(' ', '').replace(',', '.'))
+
+
+@app.route("/api/transactions", methods=["GET"])
+@login_required
+def get_transactions():
+    annee = request.args.get("annee", type=int)
+    mois = request.args.get("mois", type=int)
+    conn = get_db()
+    if annee and mois:
+        prefix = f"{annee}-{mois:02d}"
+        rows = conn.execute(
+            "SELECT * FROM transactions WHERE date_op LIKE ? ORDER BY date_op DESC, id DESC",
+            (f"{prefix}%",),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM transactions ORDER BY date_op DESC, id DESC LIMIT 500"
+        ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/transactions/import", methods=["POST"])
+@login_required
+def import_transactions():
+    import csv
+    import io
+
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "Fichier manquant"}), 400
+
+    content = file.read().decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(content), delimiter=";")
+
+    inserted = 0
+    skipped = 0
+    errors = 0
+    conn = get_db()
+
+    for row in reader:
+        try:
+            amount = _parse_french_amount(row.get("amount", "0"))
+            balance_raw = row.get("accountbalance", "").strip()
+            balance = _parse_french_amount(balance_raw) if balance_raw else None
+            result = conn.execute(
+                "INSERT OR IGNORE INTO transactions "
+                "(date_op, date_val, label, category, category_parent, supplier, amount, comment, account_num, account_label, account_balance) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    row.get("dateOp", "").strip(),
+                    row.get("dateVal", "").strip(),
+                    row.get("label", "").strip(),
+                    row.get("category", "").strip() or None,
+                    row.get("categoryParent", "").strip() or None,
+                    row.get("supplierFound", "").strip() or None,
+                    amount,
+                    row.get("comment", "").strip() or None,
+                    row.get("accountNum", "").strip() or None,
+                    row.get("accountLabel", "").strip() or None,
+                    balance,
+                ),
+            )
+            if result.rowcount:
+                inserted += 1
+            else:
+                skipped += 1
+        except Exception:
+            errors += 1
+
+    conn.commit()
+    conn.close()
+    return jsonify({"inserted": inserted, "skipped": skipped, "errors": errors})
+
+
 # ── EXPORT / IMPORT ────────────────────────────────────────────────────────────
 
 @app.route("/api/export", methods=["GET"])

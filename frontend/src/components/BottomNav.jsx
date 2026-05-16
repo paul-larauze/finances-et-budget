@@ -4,6 +4,7 @@ const TABS = [
   { id: 'placements', label: 'Placements', icon: <path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/> },
   { id: 'historique', label: 'Historique', icon: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/> },
   { id: 'graphes', label: 'Graphes', icon: <><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></> },
+  { id: 'depenses', label: 'Dépenses', icon: <><path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 000-8H4"/><path d="M5 14h11a4 4 0 010 8H4"/></> },
 ]
 
 export function BottomNav({ active, onChange }) {
