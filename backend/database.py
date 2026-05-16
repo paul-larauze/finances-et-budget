@@ -125,9 +125,11 @@ def init_db():
             "Alimentation", "Restaurants", "Transport", "Auto/Moto", "Logement",
             "Maison", "Santé", "Abonnements", "Loisirs", "Shopping", "Habillement",
             "Épargne", "Revenus", "Virements internes", "Virements",
-            "Impôts & Charges", "Divers",
+            "Impôts & Charges", "Éducation", "Divers",
         ]
         c.executemany("INSERT INTO categories (nom) VALUES (?)", [(n,) for n in cats])
+
+    c.execute("INSERT OR IGNORE INTO categories (nom) VALUES ('Éducation')")
 
     c.execute("SELECT COUNT(*) FROM categorization_rules")
     if c.fetchone()[0] == 0:
