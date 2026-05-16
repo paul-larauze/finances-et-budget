@@ -132,9 +132,7 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
             key={n}
             className={`step${step === n ? ' active' : ''}${step > n ? ' done' : ''}`}
             onClick={() => step > n && setStep(n)}
-          >
-            {n}
-          </div>
+          />
         ))}
       </div>
 
