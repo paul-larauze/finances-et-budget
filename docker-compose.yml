@@ -1,6 +1,6 @@
 services:
   finances-et-budget:
-    build: ./backend
+    build: .
     container_name: finances-et-budget
     ports:
       - "5003:5003"

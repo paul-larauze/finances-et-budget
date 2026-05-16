@@ -8,6 +8,10 @@ __pycache__/
 node_modules/
 frontend/dist/
 
+# Build React (généré par Docker ou npm run build local)
+backend/static/assets/
+backend/static/index.html
+
 # DB locale
 backend/data.db
 
