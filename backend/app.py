@@ -877,10 +877,119 @@ def recategorize_all():
 @app.route("/api/categories", methods=["GET"])
 @login_required
 def get_categories():
+    uid = g.user_id
     conn = get_db()
-    rows = conn.execute("SELECT nom FROM categories ORDER BY id").fetchall()
+    parents = conn.execute(
+        "SELECT * FROM categories WHERE user_id=? AND parent_id IS NULL ORDER BY position, id",
+        (uid,),
+    ).fetchall()
+    children = conn.execute(
+        "SELECT * FROM categories WHERE user_id=? AND parent_id IS NOT NULL ORDER BY position, id",
+        (uid,),
+    ).fetchall()
     conn.close()
-    return jsonify([r["nom"] for r in rows])
+
+    children_by_parent = {}
+    for ch in children:
+        children_by_parent.setdefault(ch["parent_id"], []).append(dict(ch))
+
+    result = []
+    for p in parents:
+        result.append({
+            **dict(p),
+            "subcategories": children_by_parent.get(p["id"], []),
+        })
+    return jsonify(result)
+
+
+@app.route("/api/categories", methods=["POST"])
+@login_required
+def add_category():
+    data = request.json
+    nom = (data.get("nom") or "").strip()
+    parent_id = data.get("parent_id")  # None = top-level
+    if not nom:
+        return jsonify({"error": "Nom requis"}), 400
+    uid = g.user_id
+    conn = get_db()
+    # Position = max existing + 1
+    if parent_id:
+        max_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) FROM categories WHERE user_id=? AND parent_id=?",
+            (uid, parent_id),
+        ).fetchone()[0]
+    else:
+        max_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) FROM categories WHERE user_id=? AND parent_id IS NULL",
+            (uid,),
+        ).fetchone()[0]
+    cursor = conn.execute(
+        "INSERT INTO categories (user_id, parent_id, nom, position) VALUES (?,?,?,?)",
+        (uid, parent_id, nom, max_pos + 1),
+    )
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "id": new_id}), 201
+
+
+@app.route("/api/categories/<int:cid>", methods=["PATCH"])
+@login_required
+def rename_category(cid):
+    data = request.json
+    nom = (data.get("nom") or "").strip()
+    if not nom:
+        return jsonify({"error": "Nom requis"}), 400
+    uid = g.user_id
+    conn = get_db()
+    old = conn.execute(
+        "SELECT nom FROM categories WHERE id=? AND user_id=?", (cid, uid)
+    ).fetchone()
+    if not old:
+        conn.close()
+        return jsonify({"error": "Catégorie introuvable"}), 404
+    old_nom = old["nom"]
+    conn.execute("UPDATE categories SET nom=? WHERE id=? AND user_id=?", (nom, cid, uid))
+    # Keep transactions and rules in sync when a subcategory is renamed
+    if old_nom != nom:
+        conn.execute(
+            "UPDATE transactions SET my_category=? WHERE my_category=? AND user_id=?",
+            (nom, old_nom, uid),
+        )
+        conn.execute(
+            "UPDATE categorization_rules SET category=? WHERE category=? AND user_id=?",
+            (nom, old_nom, uid),
+        )
+        conn.execute(
+            "UPDATE supplier_categories SET category=? WHERE category=? AND user_id=?",
+            (nom, old_nom, uid),
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/categories/<int:cid>", methods=["DELETE"])
+@login_required
+def delete_category(cid):
+    uid = g.user_id
+    conn = get_db()
+    cat = conn.execute(
+        "SELECT * FROM categories WHERE id=? AND user_id=?", (cid, uid)
+    ).fetchone()
+    if not cat:
+        conn.close()
+        return jsonify({"error": "Catégorie introuvable"}), 404
+
+    if cat["parent_id"] is None:
+        # Deleting a parent: also delete its subcategories
+        conn.execute(
+            "DELETE FROM categories WHERE parent_id=? AND user_id=?", (cid, uid)
+        )
+    conn.execute("DELETE FROM categories WHERE id=? AND user_id=?", (cid, uid))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/categorization-rules", methods=["GET"])

@@ -2,6 +2,33 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch, fmt, MOIS } from '../api/client.js'
 import { useToast } from '../components/Toast.jsx'
 import { RapportDepensesView } from './RapportDepensesView.jsx'
+import { CategoriesView } from './CategoriesView.jsx'
+
+// Returns a flat list of selectable category names from the hierarchy
+function flatCategoryNames(categories) {
+  return categories.flatMap(cat =>
+    cat.subcategories.length > 0
+      ? cat.subcategories.map(s => s.nom)
+      : [cat.nom]
+  )
+}
+
+// <select> with optgroups for hierarchical categories
+function CategorySelect({ categories, value, onChange, style }) {
+  return (
+    <select value={value} onChange={onChange} style={style}>
+      {categories.map(cat =>
+        cat.subcategories.length === 0
+          ? <option key={cat.id} value={cat.nom}>{cat.nom}</option>
+          : <optgroup key={cat.id} label={cat.nom}>
+              {cat.subcategories.map(sub =>
+                <option key={sub.id} value={sub.nom}>{sub.nom}</option>
+              )}
+            </optgroup>
+      )}
+    </select>
+  )
+}
 
 const now = new Date()
 
@@ -51,7 +78,8 @@ export function DepensesTab() {
       ])
       setCategories(cats)
       setRules(rls)
-      if (cats.length > 0 && !newRuleCat) setNewRuleCat(cats[0])
+      const flat = flatCategoryNames(cats)
+      if (flat.length > 0 && !newRuleCat) setNewRuleCat(flat[0])
     } catch {}
   }, [])
 
@@ -119,7 +147,8 @@ export function DepensesTab() {
 
   function startEditCat(t) {
     setEditingCat(t.id)
-    setEditCatVal(t.my_category || (categories[0] || ''))
+    const flat = flatCategoryNames(categories)
+    setEditCatVal(t.my_category || flat[0] || '')
   }
 
   async function saveCat(t) {
@@ -224,7 +253,11 @@ export function DepensesTab() {
 
       {/* View toggle */}
       <div style={{ display: 'flex', gap: 6 }}>
-        {[{ id: 'mouvements', label: '≡ Mouvements' }, { id: 'rapport', label: '📊 Rapport' }].map(({ id, label }) => (
+        {[
+          { id: 'mouvements', label: '≡ Mouvements' },
+          { id: 'rapport', label: '📊 Rapport' },
+          { id: 'categories', label: '🏷 Catégories' },
+        ].map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setView(id)}
@@ -237,6 +270,7 @@ export function DepensesTab() {
       </div>
 
       {view === 'rapport' && <RapportDepensesView accountType={accountType} />}
+      {view === 'categories' && <CategoriesView />}
 
       {view === 'mouvements' && <>
 
@@ -373,13 +407,12 @@ export function DepensesTab() {
                   <span style={{ fontSize: 11, color: '#888' }}>{t.date_op}</span>
                   {editingCat === t.id ? (
                     <>
-                      <select
+                      <CategorySelect
+                        categories={categories}
                         value={editCatVal}
                         onChange={e => setEditCatVal(e.target.value)}
                         style={{ fontSize: 12, padding: '2px 6px', width: 'auto', height: 26, borderRadius: 6 }}
-                      >
-                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                      />
                       <button onClick={() => saveCat(t)} className="cat-chip active" style={{ padding: '2px 8px' }}>✓</button>
                       <button onClick={() => setEditingCat(null)} className="cat-chip" style={{ padding: '2px 8px' }}>✕</button>
                     </>
@@ -425,13 +458,12 @@ export function DepensesTab() {
                 onChange={e => setNewKeyword(e.target.value)}
                 style={{ flex: 1, padding: '8px 10px', fontSize: 13, height: 36 }}
               />
-              <select
+              <CategorySelect
+                categories={categories}
                 value={newRuleCat}
                 onChange={e => setNewRuleCat(e.target.value)}
                 style={{ width: 130, fontSize: 13, height: 36, padding: '0 6px' }}
-              >
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              />
               <button type="submit" className="btn btn-primary btn-sm" style={{ height: 36, padding: '0 14px' }}>+</button>
             </form>
 

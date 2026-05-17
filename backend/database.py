@@ -91,11 +91,83 @@ def _run_multiuser_migration(conn, c):
     conn.commit()
 
 
+# ── DEFAULT CATEGORY HIERARCHY ─────────────────────────────────────────────────
+# (parent_nom, position, [(subcat_nom, position), ...])
+DEFAULT_CATEGORIES = [
+    ("Revenus", 0, [
+        ("Salaires", 0),
+        ("CAF", 1),
+    ]),
+    ("Alimentation", 1, [
+        ("Alimentation", 0),
+    ]),
+    ("Loisirs", 2, [
+        ("Shopping", 0),
+        ("Habillement", 1),
+        ("Restaurants", 2),
+        ("Maison", 3),
+        ("Vacances", 4),
+        ("Essence", 5),
+        ("Voiture", 6),
+    ]),
+    ("Frais récurrents", 3, [
+        ("Abonnements", 0),
+        ("Assurances", 1),
+    ]),
+    ("Frais standards", 4, [
+        ("Éducation", 0),
+        ("Santé", 1),
+    ]),
+    ("Non Classé", 5, []),
+]
+
+
+def _seed_categories_for_user(c, user_id):
+    c.execute("SELECT COUNT(*) FROM categories WHERE user_id=?", (user_id,))
+    if c.fetchone()[0] > 0:
+        return
+    for cat_nom, cat_pos, subcats in DEFAULT_CATEGORIES:
+        c.execute(
+            "INSERT INTO categories (user_id, parent_id, nom, position) VALUES (?,?,?,?)",
+            (user_id, None, cat_nom, cat_pos),
+        )
+        parent_id = c.lastrowid
+        for sub_nom, sub_pos in subcats:
+            c.execute(
+                "INSERT INTO categories (user_id, parent_id, nom, position) VALUES (?,?,?,?)",
+                (user_id, parent_id, sub_nom, sub_pos),
+            )
+
+
+def _migrate_to_categories_v2(conn, c):
+    """Replaces the old flat categories table with the new hierarchical one."""
+    if _table_has_column(c, "categories", "parent_id"):
+        return  # already migrated
+
+    c.execute("DROP TABLE IF EXISTS categories")
+    c.execute("""
+        CREATE TABLE categories (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            parent_id INTEGER DEFAULT NULL,
+            nom TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_categories_uid ON categories(user_id)")
+
+    # Seed for all existing users; if no users yet, first registration will seed
+    for row in c.execute("SELECT id FROM users").fetchall():
+        _seed_categories_for_user(c, row[0])
+
+    conn.commit()
+
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    # ── USERS & INVITATIONS (new tables) ────────────────────────────────────────
+    # ── USERS & INVITATIONS ──────────────────────────────────────────────────────
     c.executescript("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY,
@@ -115,11 +187,11 @@ def init_db():
     );
     """)
 
-    # ── MIGRATION: add user_id to all data tables if needed ─────────────────────
+    # ── MIGRATION: multi-user ────────────────────────────────────────────────────
     if _table_exists(c, "monthly_entries") and not _table_has_column(c, "monthly_entries", "user_id"):
         _run_multiuser_migration(conn, c)
 
-    # ── DATA TABLES (no-op if already exist) ────────────────────────────────────
+    # ── DATA TABLES ──────────────────────────────────────────────────────────────
     c.executescript("""
     CREATE TABLE IF NOT EXISTS monthly_entries (
         id INTEGER PRIMARY KEY,
@@ -206,11 +278,6 @@ def init_db():
         UNIQUE(user_id, date_op, label, amount, account_num)
     );
 
-    CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY,
-        nom TEXT NOT NULL UNIQUE
-    );
-
     CREATE TABLE IF NOT EXISTS categorization_rules (
         id INTEGER PRIMARY KEY,
         user_id INTEGER NOT NULL DEFAULT 1,
@@ -228,7 +295,21 @@ def init_db():
     );
     """)
 
-    # Indexes on user_id for all per-user tables
+    # ── MIGRATION: categories v2 (hierarchical, per-user) ───────────────────────
+    if _table_exists(c, "categories"):
+        _migrate_to_categories_v2(conn, c)
+
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL DEFAULT 1,
+        parent_id INTEGER DEFAULT NULL,
+        nom TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0
+    );
+    """)
+
+    # ── INDEXES ──────────────────────────────────────────────────────────────────
     c.executescript("""
     CREATE INDEX IF NOT EXISTS idx_monthly_entries_uid    ON monthly_entries(user_id);
     CREATE INDEX IF NOT EXISTS idx_repartition_uid        ON repartition(user_id);
@@ -240,60 +321,61 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_transactions_uid       ON transactions(user_id);
     CREATE INDEX IF NOT EXISTS idx_cat_rules_uid          ON categorization_rules(user_id);
     CREATE INDEX IF NOT EXISTS idx_supplier_cat_uid       ON supplier_categories(user_id);
+    CREATE INDEX IF NOT EXISTS idx_categories_uid         ON categories(user_id);
     """)
-
-    c.execute("SELECT COUNT(*) FROM categories")
-    if c.fetchone()[0] == 0:
-        cats = [
-            "Alimentation", "Restaurants", "Transport", "Auto/Moto", "Logement",
-            "Maison", "Santé", "Abonnements", "Loisirs", "Shopping", "Habillement",
-            "Épargne", "Revenus", "Virements internes", "Virements",
-            "Impôts & Charges", "Éducation", "Divers",
-        ]
-        c.executemany("INSERT INTO categories (nom) VALUES (?)", [(n,) for n in cats])
-
-    c.execute("INSERT OR IGNORE INTO categories (nom) VALUES ('Éducation')")
 
     conn.commit()
     conn.close()
 
 
+# ── DEFAULT SEEDS ─────────────────────────────────────────────────────────────
+
 DEFAULT_RULES = [
+    # Alimentation
     ("carrefour", "Alimentation"), ("leclerc", "Alimentation"),
     ("lidl", "Alimentation"), ("aldi", "Alimentation"),
     ("intermarche", "Alimentation"), ("monoprix", "Alimentation"),
     ("casino", "Alimentation"), ("franprix", "Alimentation"),
     ("super u", "Alimentation"), ("biocoop", "Alimentation"),
     ("picard", "Alimentation"), ("metro", "Alimentation"),
-    ("edf", "Logement"), ("engie", "Logement"),
-    ("loyer", "Logement"), ("veolia", "Logement"),
-    ("eau", "Logement"), ("charges", "Logement"),
-    ("syndic", "Logement"), ("assurance", "Logement"),
+    # Restaurants
+    ("restaurant", "Restaurants"), ("mcdonald", "Restaurants"),
+    ("burger king", "Restaurants"), ("pizza", "Restaurants"),
+    ("kebab", "Restaurants"), ("brasserie", "Restaurants"),
+    # Shopping
+    ("amazon", "Shopping"), ("cdiscount", "Shopping"),
+    ("fnac", "Shopping"), ("decathlon", "Shopping"),
+    ("cinema", "Shopping"), ("theatre", "Shopping"),
+    # Habillement
+    ("zara", "Habillement"), ("h&m", "Habillement"),
+    ("primark", "Habillement"), ("uniqlo", "Habillement"),
+    # Maison
+    ("leroy merlin", "Maison"), ("ikea", "Maison"),
+    ("brico depot", "Maison"), ("castorama", "Maison"),
+    # Essence
+    ("total", "Essence"), ("bp ", "Essence"),
+    ("shell", "Essence"), ("esso", "Essence"),
+    # Voiture / transport
+    ("sncf", "Voiture"), ("ratp", "Voiture"),
+    ("uber", "Voiture"), ("blablacar", "Voiture"),
+    ("ouigo", "Voiture"), ("transilien", "Voiture"),
+    # Abonnements
     ("orange", "Abonnements"), ("sfr", "Abonnements"),
     ("bouygues", "Abonnements"), ("free", "Abonnements"),
     ("netflix", "Abonnements"), ("spotify", "Abonnements"),
     ("amazon prime", "Abonnements"), ("disney", "Abonnements"),
     ("canal+", "Abonnements"), ("deezer", "Abonnements"),
-    ("sncf", "Transport"), ("ratp", "Transport"),
-    ("uber", "Transport"), ("blablacar", "Transport"),
-    ("ouigo", "Transport"), ("transilien", "Transport"),
-    ("total", "Auto/Moto"), ("bp ", "Auto/Moto"),
-    ("shell", "Auto/Moto"), ("esso", "Auto/Moto"),
+    # Assurances
+    ("assurance", "Assurances"),
+    # Santé
     ("pharmacie", "Santé"), ("cpam", "Santé"),
     ("medecin", "Santé"), ("hopital", "Santé"),
     ("laboratoire", "Santé"), ("dentiste", "Santé"),
-    ("restaurant", "Restaurants"), ("mcdonald", "Restaurants"),
-    ("burger king", "Restaurants"), ("pizza", "Restaurants"),
-    ("kebab", "Restaurants"), ("brasserie", "Restaurants"),
-    ("amazon", "Shopping"), ("cdiscount", "Shopping"),
-    ("fnac", "Loisirs"), ("decathlon", "Loisirs"),
-    ("cinema", "Loisirs"), ("theatre", "Loisirs"),
-    ("leroy merlin", "Maison"), ("ikea", "Maison"),
-    ("brico depot", "Maison"), ("castorama", "Maison"),
-    ("urssaf", "Impôts & Charges"), ("impot", "Impôts & Charges"),
-    ("tresor public", "Impôts & Charges"),
-    ("zara", "Habillement"), ("h&m", "Habillement"),
-    ("primark", "Habillement"), ("uniqlo", "Habillement"),
+    # Éducation
+    ("ecole", "Éducation"), ("universite", "Éducation"),
+    ("formation", "Éducation"),
+    # Revenus
+    ("caf", "CAF"),
 ]
 
 DEFAULT_SUPPORTS = [
@@ -306,18 +388,23 @@ DEFAULT_SUPPORTS = [
 
 
 def seed_new_user(conn, user_id):
-    """Seeds default categorization rules and supports for a brand new user."""
+    """Seeds default categorization rules, supports and categories for a new user."""
     c = conn.cursor()
+
     c.execute("SELECT COUNT(*) FROM categorization_rules WHERE user_id=?", (user_id,))
     if c.fetchone()[0] == 0:
         c.executemany(
             "INSERT OR IGNORE INTO categorization_rules (user_id, keyword, category) VALUES (?,?,?)",
             [(user_id, k, v) for k, v in DEFAULT_RULES],
         )
+
     c.execute("SELECT COUNT(*) FROM supports WHERE user_id=?", (user_id,))
     if c.fetchone()[0] == 0:
         c.executemany(
             "INSERT INTO supports (user_id, nom, categorie) VALUES (?,?,?)",
             [(user_id, nom, cat) for nom, cat in DEFAULT_SUPPORTS],
         )
+
+    _seed_categories_for_user(c, user_id)
+
     conn.commit()
