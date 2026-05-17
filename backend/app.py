@@ -670,7 +670,7 @@ def get_rapport():
     conn = get_db()
 
     placeholders = ",".join("?" * len(EXCLUDED_FROM_REPORT))
-    base_params = [uid, uid, account_type, start] + list(EXCLUDED_FROM_REPORT)
+    base_params = [uid, account_type, start] + list(EXCLUDED_FROM_REPORT)
 
     # Resolve category label:
     # - subcategory mode: use my_category as-is
