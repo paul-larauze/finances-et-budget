@@ -92,7 +92,7 @@ export function HistoriqueTab() {
           </div>
 
           <div className="chart-bar-container">
-            {chartRows.map((row, i) => (
+            {[...chartRows].reverse().map((row, i) => (
               <div className="chart-bar-row" key={i}>
                 <span className="chart-bar-label">
                   {MOIS[row.mois]?.slice(0, 3)} {String(row.annee).slice(2)}
