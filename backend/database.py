@@ -228,6 +228,20 @@ def init_db():
     );
     """)
 
+    # Indexes on user_id for all per-user tables
+    c.executescript("""
+    CREATE INDEX IF NOT EXISTS idx_monthly_entries_uid    ON monthly_entries(user_id);
+    CREATE INDEX IF NOT EXISTS idx_repartition_uid        ON repartition(user_id);
+    CREATE INDEX IF NOT EXISTS idx_virements_fixes_uid    ON virements_fixes(user_id);
+    CREATE INDEX IF NOT EXISTS idx_prelevements_auto_uid  ON prelevements_auto(user_id);
+    CREATE INDEX IF NOT EXISTS idx_virements_cj_uid       ON virements_cj(user_id);
+    CREATE INDEX IF NOT EXISTS idx_supports_uid           ON supports(user_id);
+    CREATE INDEX IF NOT EXISTS idx_placements_uid         ON placements(user_id);
+    CREATE INDEX IF NOT EXISTS idx_transactions_uid       ON transactions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_cat_rules_uid          ON categorization_rules(user_id);
+    CREATE INDEX IF NOT EXISTS idx_supplier_cat_uid       ON supplier_categories(user_id);
+    """)
+
     c.execute("SELECT COUNT(*) FROM categories")
     if c.fetchone()[0] == 0:
         cats = [

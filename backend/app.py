@@ -123,15 +123,9 @@ def register():
         inv = conn.execute(
             "SELECT * FROM invitation_tokens WHERE token=?", (token,)
         ).fetchone()
-        if not inv:
+        if not inv or inv["used_at"] or datetime.utcnow() > datetime.fromisoformat(inv["expires_at"]):
             conn.close()
-            return jsonify({"error": "Jeton invalide"}), 400
-        if inv["used_at"]:
-            conn.close()
-            return jsonify({"error": "Jeton déjà utilisé"}), 400
-        if datetime.utcnow().isoformat() > inv["expires_at"]:
-            conn.close()
-            return jsonify({"error": "Jeton expiré"}), 400
+            return jsonify({"error": "Jeton invalide ou expiré"}), 400
 
     existing = conn.execute(
         "SELECT id FROM users WHERE username=?", (username,)
@@ -182,7 +176,14 @@ def list_users():
 def delete_user(uid):
     if uid == g.user_id:
         return jsonify({"error": "Impossible de supprimer votre propre compte"}), 400
+    user_tables = [
+        "monthly_entries", "repartition", "virements_fixes", "prelevements_auto",
+        "virements_cj", "supports", "placements", "transactions",
+        "categorization_rules", "supplier_categories",
+    ]
     conn = get_db()
+    for table in user_tables:
+        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (uid,))
     conn.execute("DELETE FROM users WHERE id=?", (uid,))
     conn.commit()
     conn.close()
@@ -867,7 +868,7 @@ def recategorize_all():
     for tx in txs:
         cat = _categorize(tx["supplier"], tx["label"], tx["category_parent"], conn, uid)
         if cat:
-            conn.execute("UPDATE transactions SET my_category=? WHERE id=?", (cat, tx["id"]))
+            conn.execute("UPDATE transactions SET my_category=? WHERE id=? AND user_id=?", (cat, tx["id"], uid))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
