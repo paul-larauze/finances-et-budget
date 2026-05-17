@@ -134,7 +134,7 @@ def register():
         conn.close()
         return jsonify({"error": "Ce nom d'utilisateur est déjà pris"}), 400
 
-    password_hash = generate_password_hash(password)
+    password_hash = generate_password_hash(password, method="pbkdf2:sha256")
     is_admin = 1 if is_first_user else 0
     cursor = conn.execute(
         "INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)",
@@ -990,6 +990,86 @@ def delete_category(cid):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/api/categories/orphans", methods=["GET"])
+@login_required
+def get_orphan_categories():
+    uid = g.user_id
+    conn = get_db()
+    # All valid subcategory names for this user
+    valid = {
+        row[0]
+        for row in conn.execute(
+            "SELECT nom FROM categories WHERE user_id=? AND parent_id IS NOT NULL",
+            (uid,),
+        ).fetchall()
+    }
+    # Also include parent names that have no subcategories (like "Non Classé")
+    parents_no_children = conn.execute(
+        """
+        SELECT c.nom FROM categories c
+        WHERE c.user_id=? AND c.parent_id IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM categories s WHERE s.parent_id=c.id AND s.user_id=?
+          )
+        """,
+        (uid, uid),
+    ).fetchall()
+    valid |= {row[0] for row in parents_no_children}
+
+    # my_category values in transactions that are not in valid set
+    rows = conn.execute(
+        """
+        SELECT my_category, COUNT(*) as cnt
+        FROM transactions
+        WHERE user_id=? AND my_category IS NOT NULL AND my_category != ''
+        GROUP BY my_category
+        ORDER BY cnt DESC
+        """,
+        (uid,),
+    ).fetchall()
+    conn.close()
+
+    orphans = [
+        {"value": row["my_category"], "count": row["cnt"]}
+        for row in rows
+        if row["my_category"] not in valid
+    ]
+    return jsonify({"orphans": orphans, "valid": sorted(valid)})
+
+
+@app.route("/api/categories/remap", methods=["POST"])
+@login_required
+def remap_categories():
+    data = request.json
+    mappings = data.get("mappings", [])  # [{old: str, new: str}]
+    if not mappings:
+        return jsonify({"error": "Aucun mapping fourni"}), 400
+    uid = g.user_id
+    conn = get_db()
+    updated = 0
+    for m in mappings:
+        old = m.get("old", "").strip()
+        new = m.get("new", "").strip()
+        if not old or not new or old == new:
+            continue
+        r1 = conn.execute(
+            "UPDATE transactions SET my_category=? WHERE my_category=? AND user_id=?",
+            (new, old, uid),
+        )
+        r2 = conn.execute(
+            "UPDATE categorization_rules SET category=? WHERE category=? AND user_id=?",
+            (new, old, uid),
+        )
+        r3 = conn.execute(
+            "UPDATE supplier_categories SET category=? WHERE category=? AND user_id=?",
+            (new, old, uid),
+        )
+        updated += r1.rowcount + r2.rowcount + r3.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "updated": updated})
 
 
 @app.route("/api/categorization-rules", methods=["GET"])

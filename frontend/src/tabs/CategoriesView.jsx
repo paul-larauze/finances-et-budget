@@ -139,6 +139,147 @@ function CategoryCard({ cat, onRenameParent, onDeleteParent, onAddSub, onRenameS
   )
 }
 
+function MigrationPanel({ categories, toast }) {
+  const [orphans, setOrphans] = useState(null)
+  const [mappings, setMappings] = useState({}) // {oldVal: newVal}
+  const [applying, setApplying] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  // Flatten valid category names for the dropdown
+  const validNames = []
+  for (const cat of categories) {
+    if (cat.subcategories.length === 0) {
+      validNames.push(cat.nom)
+    } else {
+      for (const sub of cat.subcategories) validNames.push(sub.nom)
+    }
+  }
+
+  const load = async () => {
+    try {
+      const data = await apiFetch('/api/categories/orphans')
+      setOrphans(data.orphans)
+      // Init mappings: keep existing selections, add empty for new orphans
+      setMappings(prev => {
+        const next = {}
+        for (const o of data.orphans) next[o.value] = prev[o.value] || ''
+        return next
+      })
+    } catch {
+      toast('Erreur de chargement', 'error')
+    }
+  }
+
+  const toggle = async () => {
+    if (!open) await load()
+    setOpen(v => !v)
+  }
+
+  const apply = async () => {
+    const entries = Object.entries(mappings).filter(([, v]) => v)
+    if (!entries.length) { toast('Aucun remapping sélectionné', 'error'); return }
+    setApplying(true)
+    try {
+      const res = await apiFetch('/api/categories/remap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mappings: entries.map(([old, newv]) => ({ old, new: newv })) }),
+      })
+      toast(`Remapping appliqué — ${res.updated} ligne(s) mises à jour`, 'success')
+      await load() // refresh orphans
+    } catch {
+      toast('Erreur lors du remapping', 'error')
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const pendingCount = Object.values(mappings).filter(Boolean).length
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <button
+        onClick={toggle}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', padding: '12px 14px', background: 'none', border: 'none',
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <span style={{ fontWeight: 600, fontSize: 14 }}>
+          Remapper les catégories existantes
+          {orphans && orphans.length > 0 && (
+            <span style={{
+              marginLeft: 8, background: 'var(--primary)', color: '#fff',
+              borderRadius: 10, padding: '2px 7px', fontSize: 11, fontWeight: 700,
+            }}>{orphans.length}</span>
+          )}
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+          {orphans === null ? (
+            <p style={{ color: 'var(--muted)', fontSize: 13 }}>Chargement…</p>
+          ) : orphans.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
+              Toutes les catégories sont déjà alignées. Rien à remapper.
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>
+                Ces catégories présentes dans vos transactions ne correspondent à aucune sous-catégorie actuelle.
+                Choisissez une cible pour chacune.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                {orphans.map(o => (
+                  <div key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{
+                      flex: '0 0 180px', fontSize: 13, fontWeight: 600,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }} title={o.value}>
+                      {o.value}
+                      <span style={{ fontWeight: 400, color: 'var(--muted)', marginLeft: 4 }}>
+                        ({o.count})
+                      </span>
+                    </span>
+                    <span style={{ color: 'var(--muted)', fontSize: 13 }}>→</span>
+                    <select
+                      value={mappings[o.value] || ''}
+                      onChange={e => setMappings(prev => ({ ...prev, [o.value]: e.target.value }))}
+                      style={{ flex: 1, fontSize: 13, padding: '5px 8px', height: 34 }}
+                    >
+                      <option value="">— Ignorer —</option>
+                      {categories.map(cat => (
+                        cat.subcategories.length > 0
+                          ? <optgroup key={cat.id} label={cat.nom}>
+                              {cat.subcategories.map(sub => (
+                                <option key={sub.id} value={sub.nom}>{sub.nom}</option>
+                              ))}
+                            </optgroup>
+                          : <option key={cat.id} value={cat.nom}>{cat.nom}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={apply}
+                disabled={applying || pendingCount === 0}
+                style={{ fontSize: 13 }}
+              >
+                {applying ? 'Application…' : `Appliquer le remapping (${pendingCount} sélectionné${pendingCount > 1 ? 's' : ''})`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CategoriesView() {
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
@@ -254,6 +395,8 @@ export function CategoriesView() {
           onDeleteSub={deleteSub}
         />
       ))}
+
+      <MigrationPanel categories={categories} toast={toast} />
 
       {/* Add parent category */}
       <div className="card">
