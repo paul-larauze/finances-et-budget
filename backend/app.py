@@ -656,6 +656,7 @@ def get_rapport():
     from datetime import date
     account_type = request.args.get("account_type", "perso")
     months = request.args.get("months", 6, type=int)
+    group_by = request.args.get("group_by", "parent")  # "parent" | "subcategory"
     uid = g.user_id
 
     today = date.today()
@@ -669,32 +670,57 @@ def get_rapport():
     conn = get_db()
 
     placeholders = ",".join("?" * len(EXCLUDED_FROM_REPORT))
-    base_params = [uid, account_type, start] + list(EXCLUDED_FROM_REPORT)
+    base_params = [uid, uid, account_type, start] + list(EXCLUDED_FROM_REPORT)
+
+    # Resolve category label:
+    # - subcategory mode: use my_category as-is
+    # - parent mode: join categories to find parent; if already a top-level category use its name
+    if group_by == "parent":
+        cat_expr = """
+            COALESCE(
+                parent.nom,
+                CASE WHEN cats.parent_id IS NULL THEN cats.nom ELSE NULL END,
+                t.my_category,
+                'Non catégorisé'
+            )
+        """
+        join_clause = """
+            LEFT JOIN categories cats
+                ON cats.user_id = t.user_id AND cats.nom = t.my_category
+            LEFT JOIN categories parent
+                ON parent.id = cats.parent_id AND parent.user_id = t.user_id
+        """
+    else:
+        cat_expr = "COALESCE(t.my_category, 'Non catégorisé')"
+        join_clause = ""
 
     by_cat = conn.execute(f"""
-        SELECT COALESCE(my_category, 'Non catégorisé') as cat,
-               ABS(SUM(amount)) as total, COUNT(*) as cnt
-        FROM transactions
-        WHERE user_id=? AND account_type=? AND amount < 0 AND date_op >= ?
-          AND COALESCE(my_category, '') NOT IN ({placeholders})
+        SELECT {cat_expr} as cat,
+               ABS(SUM(t.amount)) as total, COUNT(*) as cnt
+        FROM transactions t
+        {join_clause}
+        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0 AND t.date_op >= ?
+          AND COALESCE(t.my_category, '') NOT IN ({placeholders})
         GROUP BY cat ORDER BY total DESC
     """, base_params).fetchall()
 
     monthly = conn.execute(f"""
-        SELECT substr(date_op, 1, 7) as month, ABS(SUM(amount)) as total
-        FROM transactions
-        WHERE user_id=? AND account_type=? AND amount < 0 AND date_op >= ?
-          AND COALESCE(my_category, '') NOT IN ({placeholders})
+        SELECT substr(t.date_op, 1, 7) as month, ABS(SUM(t.amount)) as total
+        FROM transactions t
+        {join_clause}
+        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0 AND t.date_op >= ?
+          AND COALESCE(t.my_category, '') NOT IN ({placeholders})
         GROUP BY month ORDER BY month
     """, base_params).fetchall()
 
     monthly_by_cat = conn.execute(f"""
-        SELECT substr(date_op, 1, 7) as month,
-               COALESCE(my_category, 'Non catégorisé') as cat,
-               ABS(SUM(amount)) as total
-        FROM transactions
-        WHERE user_id=? AND account_type=? AND amount < 0 AND date_op >= ?
-          AND COALESCE(my_category, '') NOT IN ({placeholders})
+        SELECT substr(t.date_op, 1, 7) as month,
+               {cat_expr} as cat,
+               ABS(SUM(t.amount)) as total
+        FROM transactions t
+        {join_clause}
+        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0 AND t.date_op >= ?
+          AND COALESCE(t.my_category, '') NOT IN ({placeholders})
         GROUP BY month, cat ORDER BY month, total DESC
     """, base_params).fetchall()
 

@@ -15,6 +15,11 @@ const PERIODS = [
   { label: '12 mois', value: 12 },
 ]
 
+const GROUP_MODES = [
+  { label: 'Par catégorie', value: 'parent' },
+  { label: 'Par sous-catégorie', value: 'subcategory' },
+]
+
 const PALETTE = [
   '#16a34a', '#0891b2', '#7c3aed', '#db2777',
   '#ea580c', '#d97706', '#0d9488', '#2563eb',
@@ -28,20 +33,21 @@ function catColor(index) {
 
 export function RapportDepensesView({ accountType }) {
   const [months, setMonths] = useState(6)
+  const [groupBy, setGroupBy] = useState('parent')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const d = await apiFetch(`/api/transactions/rapport?account_type=${accountType}&months=${months}`)
+      const d = await apiFetch(`/api/transactions/rapport?account_type=${accountType}&months=${months}&group_by=${groupBy}`)
       setData(d)
     } catch {
       setData(null)
     } finally {
       setLoading(false)
     }
-  }, [accountType, months])
+  }, [accountType, months, groupBy])
 
   useEffect(() => { load() }, [load])
 
@@ -136,6 +142,20 @@ export function RapportDepensesView({ accountType }) {
             style={{ flex: 1, textAlign: 'center' }}
           >
             {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Group by selector */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {GROUP_MODES.map(g => (
+          <button
+            key={g.value}
+            onClick={() => setGroupBy(g.value)}
+            className={`cat-chip${groupBy === g.value ? ' active' : ''}`}
+            style={{ flex: 1, textAlign: 'center' }}
+          >
+            {g.label}
           </button>
         ))}
       </div>
