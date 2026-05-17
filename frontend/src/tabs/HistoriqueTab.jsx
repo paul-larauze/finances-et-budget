@@ -43,6 +43,10 @@ export function HistoriqueTab() {
   const chartRows = rows.slice(-12)
   const maxTotal = chartRows.length > 0 ? Math.max(...chartRows.map(r => r.total || 0)) : 1
 
+  function barPct(val) {
+    return maxTotal > 0 ? Math.round((val / maxTotal) * 100) : 0
+  }
+
   return (
     <div>
       {/* Summary cards */}
@@ -75,24 +79,35 @@ export function HistoriqueTab() {
       {!loading && chartRows.length > 0 && (
         <div className="card">
           <p className="card-title">Patrimoine — 12 derniers mois</p>
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 10, fontSize: 12, color: 'var(--muted)' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--primary)', display: 'inline-block' }} />
+              Livrets
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />
+              Bourse
+            </span>
+          </div>
+
           <div className="chart-bar-container">
-            {chartRows.map((row, i) => {
-              const pct = maxTotal > 0 ? Math.round((row.total / maxTotal) * 100) : 0
-              return (
-                <div className="chart-bar-row" key={i}>
-                  <span className="chart-bar-label">
-                    {MOIS[row.mois]?.slice(0, 3)} {String(row.annee).slice(2)}
-                  </span>
-                  <div className="chart-bar-outer">
-                    <div
-                      className="chart-bar-inner"
-                      style={{ width: `${pct}%` }}
-                    />
+            {chartRows.map((row, i) => (
+              <div className="chart-bar-row" key={i}>
+                <span className="chart-bar-label">
+                  {MOIS[row.mois]?.slice(0, 3)} {String(row.annee).slice(2)}
+                </span>
+                <div className="chart-bar-outer">
+                  <div style={{ display: 'flex', height: '100%', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${barPct(row.livrets || 0)}%`, background: 'var(--primary)', transition: 'width 0.5s ease' }} />
+                    <div style={{ width: `${barPct(row.bourse || 0)}%`, background: '#2563eb', transition: 'width 0.5s ease' }} />
                   </div>
-                  <span className="chart-bar-value">{fmt(row.total)}</span>
                 </div>
-              )
-            })}
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', minWidth: 72, textAlign: 'right' }}>
+                  {fmt(row.total)}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
