@@ -50,8 +50,10 @@ export function DepensesTab() {
   const [importResult, setImportResult] = useState(null)
   const [editingCat, setEditingCat] = useState(null)
   const [editCatVal, setEditCatVal] = useState('')
-  const [catFilter, setCatFilter] = useState('')
-  const [amountFilter, setAmountFilter] = useState('')
+  const [labelFilter, setLabelFilter]     = useState('')
+  const [parentFilter, setParentFilter]   = useState('')
+  const [catFilter, setCatFilter]         = useState('')
+  const [amountFilter, setAmountFilter]   = useState('')
   const [showRules, setShowRules] = useState(false)
   const [newKeyword, setNewKeyword] = useState('')
   const [newRuleCat, setNewRuleCat] = useState('')
@@ -86,10 +88,16 @@ export function DepensesTab() {
   useEffect(() => { loadTransactions() }, [loadTransactions])
   useEffect(() => { loadMeta() }, [loadMeta])
 
-  function switchAccount(id) {
-    setAccountType(id)
+  function resetFilters() {
+    setLabelFilter('')
+    setParentFilter('')
     setCatFilter('')
     setAmountFilter('')
+  }
+
+  function switchAccount(id) {
+    setAccountType(id)
+    resetFilters()
     setImportResult(null)
   }
 
@@ -101,8 +109,7 @@ export function DepensesTab() {
       return m
     })
     setImportResult(null)
-    setCatFilter('')
-    setAmountFilter('')
+    resetFilters()
   }
 
   async function deleteTransaction(id) {
@@ -207,13 +214,25 @@ export function DepensesTab() {
     }
   }
 
+  // Map subcategory name → parent name
+  const subToParent = {}
+  for (const cat of categories) {
+    for (const sub of cat.subcategories) subToParent[sub.nom] = cat.nom
+  }
+
+  const hasFilters = labelFilter || parentFilter || catFilter || amountFilter
+
   const filtered = transactions.filter(t => {
+    if (labelFilter && !shortLabel(t.label).toLowerCase().includes(labelFilter.toLowerCase())) return false
+    if (parentFilter) {
+      const parent = subToParent[t.my_category] || (categories.find(c => c.nom === t.my_category) ? t.my_category : null)
+      if (parent !== parentFilter) return false
+    }
     if (catFilter && t.my_category !== catFilter) return false
     if (amountFilter) {
       const needle = amountFilter.replace(',', '.').replace(/\s/g, '')
-      const abs = String(Math.abs(t.amount)).replace('.', ',')
       const absStr = String(Math.abs(t.amount))
-      if (!abs.startsWith(needle.replace('.', ',')) && !absStr.startsWith(needle)) return false
+      if (!absStr.startsWith(needle)) return false
     }
     return true
   })
@@ -228,7 +247,6 @@ export function DepensesTab() {
     byCat[cat] = (byCat[cat] || 0) + t.amount
   }
   const catBreakdown = Object.entries(byCat).sort((a, b) => a[1] - b[1])
-  const usedCats = [...new Set(transactions.map(t => t.my_category).filter(Boolean))]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -326,7 +344,7 @@ export function DepensesTab() {
               <p className="card-title" style={{ fontSize: 12, marginBottom: 8 }}>Par catégorie</p>
               <ul className="transfer-list" style={{ fontSize: 13 }}>
                 {catBreakdown.map(([cat, total]) => (
-                  <li key={cat} onClick={() => setCatFilter(catFilter === cat ? '' : cat)}
+                  <li key={cat} onClick={() => { setCatFilter(catFilter === cat ? '' : cat); setParentFilter('') }}
                       style={{ cursor: 'pointer', background: catFilter === cat ? '#f0fdf4' : 'transparent', margin: '0 -4px', padding: '8px 4px', borderRadius: 6 }}>
                     <span className="transfer-name">{cat}</span>
                     <span className="transfer-amount negative">{fmt(total)}</span>
@@ -345,15 +363,54 @@ export function DepensesTab() {
             Mouvements
             {transactions.length > 0 && <span style={{ fontWeight: 400, color: '#888', marginLeft: 6 }}>({filtered.length})</span>}
           </p>
-          {catFilter && (
-            <button className="cat-chip active" onClick={() => setCatFilter('')} style={{ fontSize: 11 }}>
-              {catFilter} ✕
+          {hasFilters && (
+            <button className="btn-sm btn-outline" onClick={resetFilters} style={{ fontSize: 11 }}>
+              Réinitialiser ✕
             </button>
           )}
         </div>
 
-        {/* Amount filter */}
-        <div style={{ marginBottom: 10 }}>
+        {/* Filters */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {/* Libellé */}
+          <div className="input-suffix">
+            <input
+              type="text"
+              placeholder="🔍 Rechercher un libellé…"
+              value={labelFilter}
+              onChange={e => setLabelFilter(e.target.value)}
+              style={{ fontSize: 13, padding: '7px 32px 7px 10px' }}
+            />
+            {labelFilter && <span style={{ cursor: 'pointer', color: '#888' }} onClick={() => setLabelFilter('')}>✕</span>}
+          </div>
+
+          {/* Catégorie + Sous-catégorie */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select
+              value={parentFilter}
+              onChange={e => { setParentFilter(e.target.value); setCatFilter('') }}
+              style={{ flex: 1, fontSize: 13, padding: '7px 8px', height: 36, borderRadius: 8, border: '1px solid var(--border)' }}
+            >
+              <option value="">Toutes catégories</option>
+              {categories.map(cat => (
+                <option key={cat.id} value={cat.nom}>{cat.nom}</option>
+              ))}
+            </select>
+            <select
+              value={catFilter}
+              onChange={e => setCatFilter(e.target.value)}
+              style={{ flex: 1, fontSize: 13, padding: '7px 8px', height: 36, borderRadius: 8, border: '1px solid var(--border)' }}
+            >
+              <option value="">Toutes sous-catégories</option>
+              {categories
+                .filter(cat => !parentFilter || cat.nom === parentFilter)
+                .flatMap(cat => cat.subcategories.length > 0 ? cat.subcategories : [{ id: cat.id, nom: cat.nom }])
+                .map(sub => <option key={sub.id} value={sub.nom}>{sub.nom}</option>)
+              }
+            </select>
+          </div>
+
+          {/* Montant */}
           <div className="input-suffix">
             <input
               type="number"
@@ -362,25 +419,11 @@ export function DepensesTab() {
               placeholder="Filtrer par montant…"
               value={amountFilter}
               onChange={e => setAmountFilter(e.target.value)}
-              style={{ fontSize: 14, padding: '8px 36px 8px 12px' }}
+              style={{ fontSize: 13, padding: '7px 32px 7px 10px' }}
             />
-            {amountFilter && (
-              <span style={{ cursor: 'pointer', color: '#888' }} onClick={() => setAmountFilter('')}>✕</span>
-            )}
+            {amountFilter && <span style={{ cursor: 'pointer', color: '#888' }} onClick={() => setAmountFilter('')}>✕</span>}
           </div>
         </div>
-
-        {/* Category filter chips */}
-        {usedCats.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 10, marginBottom: 4 }}>
-            <button className={`cat-chip${!catFilter ? ' active' : ''}`} onClick={() => setCatFilter('')}>Tout</button>
-            {usedCats.map(c => (
-              <button key={c} className={`cat-chip${catFilter === c ? ' active' : ''}`} onClick={() => setCatFilter(catFilter === c ? '' : c)}>
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
 
         {loading && <p style={{ textAlign: 'center', color: '#888' }}>Chargement…</p>}
         {!loading && transactions.length === 0 && (
