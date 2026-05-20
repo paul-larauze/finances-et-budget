@@ -786,6 +786,74 @@ def get_transactions():
     return jsonify([dict(r) for r in rows])
 
 
+def _parse_axa_row(row):
+    """Normalize an AXA Bank CSV row to the internal transaction dict."""
+    # Date: DD/MM/YYYY → YYYY-MM-DD
+    def _fmt_date(s):
+        s = s.strip().strip('"')
+        if not s:
+            return ""
+        d, m, y = s.split("/")
+        return f"{y}-{m}-{d}"
+
+    debit_raw  = row.get("Debit",  "").strip().strip('"')
+    credit_raw = row.get("Credit", "").strip().strip('"')
+    debit  = _parse_french_amount(debit_raw)  if debit_raw  else 0.0
+    credit = _parse_french_amount(credit_raw) if credit_raw else 0.0
+    # Convention: debits are negative, credits positive
+    amount = credit - debit
+
+    label = row.get("Libelle", "").strip().strip('"')
+    date_op  = _fmt_date(row.get("Date operation", ""))
+    date_val = _fmt_date(row.get("Date valeur", ""))
+
+    return {
+        "date_op":  date_op,
+        "date_val": date_val,
+        "label":    label,
+        "amount":   amount,
+        # AXA doesn't provide these fields
+        "category":        None,
+        "category_parent": None,
+        "supplier":        None,
+        "comment":         None,
+        "account_num":     None,
+        "account_label":   None,
+        "account_balance": None,
+    }
+
+
+def _parse_boursobank_row(row):
+    """Normalize a Boursobank CSV row to the internal transaction dict."""
+    amount = _parse_french_amount(row.get("amount", "0"))
+    balance_raw = row.get("accountbalance", "").strip()
+    balance = _parse_french_amount(balance_raw) if balance_raw else None
+    supplier = row.get("supplierFound", "").strip() or None
+    cat_parent = row.get("categoryParent", "").strip() or None
+    label = row.get("label", "").strip()
+    return {
+        "date_op":         row.get("dateOp",       "").strip(),
+        "date_val":        row.get("dateVal",       "").strip(),
+        "label":           label,
+        "amount":          amount,
+        "category":        row.get("category",     "").strip() or None,
+        "category_parent": cat_parent,
+        "supplier":        supplier,
+        "comment":         row.get("comment",      "").strip() or None,
+        "account_num":     row.get("accountNum",   "").strip() or None,
+        "account_label":   row.get("accountLabel", "").strip() or None,
+        "account_balance": balance,
+    }
+
+
+def _detect_bank_format(fieldnames):
+    """Return 'axa' or 'boursobank' based on CSV header fields."""
+    fields = [f.strip().strip('"') for f in (fieldnames or [])]
+    if "Libelle" in fields or "Date operation" in fields:
+        return "axa"
+    return "boursobank"
+
+
 @app.route("/api/transactions/import", methods=["POST"])
 @login_required
 def import_transactions():
@@ -802,6 +870,8 @@ def import_transactions():
     content = file.read().decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(content), delimiter=";")
 
+    bank_format = _detect_bank_format(reader.fieldnames)
+
     inserted = 0
     skipped = 0
     errors = 0
@@ -809,13 +879,13 @@ def import_transactions():
 
     for row in reader:
         try:
-            amount = _parse_french_amount(row.get("amount", "0"))
-            balance_raw = row.get("accountbalance", "").strip()
-            balance = _parse_french_amount(balance_raw) if balance_raw else None
-            supplier = row.get("supplierFound", "").strip() or None
-            cat_parent = row.get("categoryParent", "").strip() or None
-            label = row.get("label", "").strip()
-            my_cat = _categorize(supplier, label, cat_parent, conn, uid)
+            if bank_format == "axa":
+                t = _parse_axa_row(row)
+            else:
+                t = _parse_boursobank_row(row)
+
+            my_cat = _categorize(t["supplier"], t["label"], t["category_parent"], conn, uid)
+
             result = conn.execute(
                 "INSERT OR IGNORE INTO transactions "
                 "(user_id, date_op, date_val, label, category, category_parent, supplier, amount, "
@@ -823,17 +893,17 @@ def import_transactions():
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     uid,
-                    row.get("dateOp", "").strip(),
-                    row.get("dateVal", "").strip(),
-                    label,
-                    row.get("category", "").strip() or None,
-                    cat_parent,
-                    supplier,
-                    amount,
-                    row.get("comment", "").strip() or None,
-                    row.get("accountNum", "").strip() or None,
-                    row.get("accountLabel", "").strip() or None,
-                    balance,
+                    t["date_op"],
+                    t["date_val"],
+                    t["label"],
+                    t["category"],
+                    t["category_parent"],
+                    t["supplier"],
+                    t["amount"],
+                    t["comment"],
+                    t["account_num"],
+                    t["account_label"],
+                    t["account_balance"],
                     my_cat,
                     account_type,
                 ),
@@ -847,7 +917,7 @@ def import_transactions():
 
     conn.commit()
     conn.close()
-    return jsonify({"inserted": inserted, "skipped": skipped, "errors": errors})
+    return jsonify({"inserted": inserted, "skipped": skipped, "errors": errors, "format": bank_format})
 
 
 @app.route("/api/transactions/<int:tid>", methods=["DELETE"])
