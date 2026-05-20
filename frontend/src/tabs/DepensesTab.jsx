@@ -288,7 +288,7 @@ export function DepensesTab() {
           onClick={() => fileRef.current.click()}
           disabled={importing}
         >
-          {importing ? 'Import en cours…' : '↑ Importer un CSV BoursoBank'}
+          {importing ? 'Import en cours…' : '↑ Importer un CSV de relevés de comptes'}
         </button>
         <input
           ref={fileRef}
