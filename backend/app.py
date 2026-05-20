@@ -655,26 +655,26 @@ EXCLUDED_FROM_REPORT = ('Virements internes', 'Virements', 'Revenus', 'Épargne'
 def get_rapport():
     from datetime import date
     account_type = request.args.get("account_type", "perso")
-    months = request.args.get("months", 6, type=int)
     group_by = request.args.get("group_by", "parent")  # "parent" | "subcategory"
+    year = request.args.get("year", date.today().year, type=int)
+    # months = comma-separated list of month numbers, e.g. "1,3,5"
+    months_raw = request.args.get("months", str(date.today().month))
+    selected_months = [int(m) for m in months_raw.split(",") if m.strip().isdigit()]
+    if not selected_months:
+        selected_months = [date.today().month]
+
     uid = g.user_id
-
-    today = date.today()
-    m = today.month - months
-    y = today.year
-    while m <= 0:
-        m += 12
-        y -= 1
-    start = f"{y}-{m:02d}-01"
-
     conn = get_db()
 
-    placeholders = ",".join("?" * len(EXCLUDED_FROM_REPORT))
-    base_params = [uid, account_type, start] + list(EXCLUDED_FROM_REPORT)
+    # Build month filter: date_op LIKE 'YYYY-MM-%'
+    month_conditions = " OR ".join(
+        f"t.date_op LIKE '{year}-{m:02d}-%'" for m in selected_months
+    )
+    month_filter = f"AND ({month_conditions})"
 
-    # Resolve category label:
-    # - subcategory mode: use my_category as-is
-    # - parent mode: join categories to find parent; if already a top-level category use its name
+    placeholders = ",".join("?" * len(EXCLUDED_FROM_REPORT))
+    base_params = [uid, account_type] + list(EXCLUDED_FROM_REPORT)
+
     if group_by == "parent":
         cat_expr = """
             COALESCE(
@@ -699,7 +699,8 @@ def get_rapport():
                ABS(SUM(t.amount)) as total, COUNT(*) as cnt
         FROM transactions t
         {join_clause}
-        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0 AND t.date_op >= ?
+        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0
+          {month_filter}
           AND COALESCE(t.my_category, '') NOT IN ({placeholders})
         GROUP BY cat ORDER BY total DESC
     """, base_params).fetchall()
@@ -708,7 +709,8 @@ def get_rapport():
         SELECT substr(t.date_op, 1, 7) as month, ABS(SUM(t.amount)) as total
         FROM transactions t
         {join_clause}
-        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0 AND t.date_op >= ?
+        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0
+          {month_filter}
           AND COALESCE(t.my_category, '') NOT IN ({placeholders})
         GROUP BY month ORDER BY month
     """, base_params).fetchall()
@@ -719,7 +721,8 @@ def get_rapport():
                ABS(SUM(t.amount)) as total
         FROM transactions t
         {join_clause}
-        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0 AND t.date_op >= ?
+        WHERE t.user_id=? AND t.account_type=? AND t.amount < 0
+          {month_filter}
           AND COALESCE(t.my_category, '') NOT IN ({placeholders})
         GROUP BY month, cat ORDER BY month, total DESC
     """, base_params).fetchall()
