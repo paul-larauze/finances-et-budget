@@ -182,6 +182,7 @@ function AdminPanel({ onClose, currentUsername }) {
   const [users, setUsers] = useState([])
   const [invites, setInvites] = useState([])
   const [adminTab, setAdminTab] = useState('users')
+  const [generatedLink, setGeneratedLink] = useState(null)
   const [copied, setCopied] = useState(false)
   const toast = useToast()
 
@@ -197,11 +198,17 @@ function AdminPanel({ onClose, currentUsername }) {
     try {
       const data = await apiFetch('/api/auth/invite', { method: 'POST' })
       const link = `${window.location.origin}/?token=${data.token}`
-      await navigator.clipboard.writeText(link)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 3000)
+      setGeneratedLink(link)
       loadInvites()
-      toast('Lien copié dans le presse-papier !', 'success')
+      // Clipboard API requires HTTPS — fallback to showing the link manually
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(link)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 3000)
+        toast('Lien copié dans le presse-papier !', 'success')
+      } else {
+        toast('Lien généré — copiez-le ci-dessous', 'success')
+      }
     } catch {
       toast('Erreur lors de la génération du lien', 'error')
     }
@@ -246,6 +253,17 @@ function AdminPanel({ onClose, currentUsername }) {
               <button className="btn-sm btn-success" onClick={generateInvite}>
                 {copied ? '✓ Lien copié !' : '+ Générer un lien d\'invitation'}
               </button>
+              {generatedLink && (
+                <div style={{ marginTop: 10, padding: '8px 10px', background: '#f8fafc', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Lien d'invitation :</div>
+                  <input
+                    readOnly
+                    value={generatedLink}
+                    onFocus={e => e.target.select()}
+                    style={{ width: '100%', fontSize: 11, padding: '4px 6px', boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               {users.map(u => (
