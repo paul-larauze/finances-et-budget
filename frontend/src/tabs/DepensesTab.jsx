@@ -420,7 +420,11 @@ export function DepensesTab() {
                     <span
                       className={`cat-badge${t.my_category ? '' : ' cat-badge-empty'}`}
                       onClick={() => startEditCat(t)}
-                      style={t.my_category ? { color: t.amount >= 0 ? 'var(--success)' : 'var(--danger)' } : {}}
+                      style={t.my_category ? (
+                        t.amount >= 0
+                          ? { background: '#f0fdf4', color: 'var(--success)', borderColor: '#bbf7d0' }
+                          : { background: '#fef2f2', color: 'var(--danger)',  borderColor: '#fecaca' }
+                      ) : {}}
                     >
                       {t.my_category || 'Catégoriser'} ▾
                     </span>
