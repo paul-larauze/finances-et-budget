@@ -417,7 +417,11 @@ export function DepensesTab() {
                       <button onClick={() => setEditingCat(null)} className="cat-chip" style={{ padding: '2px 8px' }}>✕</button>
                     </>
                   ) : (
-                    <span className={`cat-badge${t.my_category ? '' : ' cat-badge-empty'}`} onClick={() => startEditCat(t)}>
+                    <span
+                      className={`cat-badge${t.my_category ? '' : ' cat-badge-empty'}`}
+                      onClick={() => startEditCat(t)}
+                      style={t.my_category ? { color: t.amount >= 0 ? 'var(--success)' : 'var(--danger)' } : {}}
+                    >
                       {t.my_category || 'Catégoriser'} ▾
                     </span>
                   )}
