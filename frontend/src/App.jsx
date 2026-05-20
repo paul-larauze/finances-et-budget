@@ -2,12 +2,9 @@ import { useState, useEffect } from 'react'
 import { Header } from './components/Header'
 import { BottomNav } from './components/BottomNav'
 import { ToastContainer, useToast } from './components/Toast'
-import { SaisieTab } from './tabs/SaisieTab'
-import { AutoTab } from './tabs/AutoTab'
-import { PlacementsTab } from './tabs/PlacementsTab'
-import { HistoriqueTab } from './tabs/HistoriqueTab'
-import { GraphesTab } from './tabs/GraphesTab'
 import { DepensesTab } from './tabs/DepensesTab'
+import { EpargneTab } from './tabs/EpargneTab'
+import { VirementsTab } from './tabs/VirementsTab'
 import { apiFetch } from './api/client'
 
 // ── LOGIN ──────────────────────────────────────────────────────────────────────
@@ -300,7 +297,7 @@ function AdminPanel({ onClose, currentUsername }) {
 // ── APP ────────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [tab, setTab] = useState('saisie')
+  const [tab, setTab] = useState('depenses')
   // null=loading, false=not authenticated, { username, is_admin }=authenticated
   const [user, setUser] = useState(null)
   const [firstUser, setFirstUser] = useState(false)
@@ -389,25 +386,23 @@ export default function App() {
     <>
       <Header
         annee={annee}
-        mois={tab === 'saisie' ? mois : null}
+        mois={tab === 'virements' ? mois : null}
         user={user}
         onLogout={handleLogout}
         onAdmin={user.is_admin ? () => setShowAdmin(true) : null}
       />
       <div className="main">
-        {tab === 'saisie' && (
-          <SaisieTab
-            annee={annee} mois={mois}
+        {tab === 'depenses'  && <DepensesTab />}
+        {tab === 'epargne'   && <EpargneTab />}
+        {tab === 'virements' && (
+          <VirementsTab
+            annee={annee}
+            mois={mois}
             onMonthChange={handleMonthChange}
             virementsFixesData={virementsFixesData}
             prelevementsData={prelevementsData}
           />
         )}
-        {tab === 'auto' && <AutoTab />}
-        {tab === 'placements' && <PlacementsTab />}
-        {tab === 'historique' && <HistoriqueTab />}
-        {tab === 'graphes' && <GraphesTab />}
-        {tab === 'depenses' && <DepensesTab />}
       </div>
       <BottomNav active={tab} onChange={setTab} />
       <ToastContainer />
