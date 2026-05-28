@@ -2,39 +2,71 @@ import { useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '../api/client.js'
 import { useToast } from '../components/Toast.jsx'
 
-function SubcategoryRow({ sub, onRename, onDelete }) {
-  const [editing, setEditing] = useState(false)
+function SubcategoryRow({ sub, currentParentId, allParents, onRename, onDelete, onMove }) {
+  const [mode, setMode] = useState(null) // null | 'rename' | 'move'
   const [val, setVal] = useState(sub.nom)
+  const [targetParent, setTargetParent] = useState('')
 
   const save = async () => {
-    if (!val.trim() || val === sub.nom) { setEditing(false); return }
+    if (!val.trim() || val === sub.nom) { setMode(null); return }
     await onRename(sub.id, val.trim())
-    setEditing(false)
+    setMode(null)
   }
+
+  const confirmMove = async () => {
+    if (!targetParent) return
+    await onMove(sub.id, parseInt(targetParent))
+    setMode(null)
+    setTargetParent('')
+  }
+
+  const otherParents = allParents.filter(p => p.id !== currentParentId)
 
   return (
     <li style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 7px 16px', borderBottom: '1px solid var(--border)' }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--muted)', flexShrink: 0 }} />
-      {editing ? (
+      {mode === 'rename' ? (
         <>
           <input
             value={val}
             onChange={e => setVal(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setMode(null) }}
             autoFocus
             style={{ flex: 1, fontSize: 14, padding: '4px 8px', height: 30 }}
           />
           <button className="btn-sm btn-primary" onClick={save} style={{ padding: '4px 10px' }}>✓</button>
-          <button className="btn-sm btn-outline" onClick={() => { setEditing(false); setVal(sub.nom) }} style={{ padding: '4px 8px' }}>✕</button>
+          <button className="btn-sm btn-outline" onClick={() => { setMode(null); setVal(sub.nom) }} style={{ padding: '4px 8px' }}>✕</button>
+        </>
+      ) : mode === 'move' ? (
+        <>
+          <select
+            value={targetParent}
+            onChange={e => setTargetParent(e.target.value)}
+            autoFocus
+            style={{ flex: 1, fontSize: 13, padding: '4px 8px', height: 30 }}
+          >
+            <option value="">— Choisir une catégorie —</option>
+            {otherParents.map(p => (
+              <option key={p.id} value={p.id}>{p.nom}</option>
+            ))}
+          </select>
+          <button className="btn-sm btn-primary" onClick={confirmMove} disabled={!targetParent} style={{ padding: '4px 10px' }}>✓</button>
+          <button className="btn-sm btn-outline" onClick={() => { setMode(null); setTargetParent('') }} style={{ padding: '4px 8px' }}>✕</button>
         </>
       ) : (
         <>
           <span style={{ flex: 1, fontSize: 14 }}>{sub.nom}</span>
           <button
             className="btn-sm btn-outline"
-            onClick={() => setEditing(true)}
+            onClick={() => setMode('rename')}
             style={{ fontSize: 11, padding: '3px 8px' }}
           >Renommer</button>
+          <button
+            className="btn-sm btn-outline"
+            onClick={() => setMode('move')}
+            style={{ fontSize: 11, padding: '3px 8px' }}
+            title="Déplacer vers une autre catégorie"
+          >⇄</button>
           <button
             className="btn-sm btn-danger"
             onClick={() => onDelete(sub.id, sub.nom)}
@@ -46,7 +78,7 @@ function SubcategoryRow({ sub, onRename, onDelete }) {
   )
 }
 
-function CategoryCard({ cat, onRenameParent, onDeleteParent, onAddSub, onRenameSub, onDeleteSub }) {
+function CategoryCard({ cat, allParents, onRenameParent, onDeleteParent, onAddSub, onRenameSub, onDeleteSub, onMoveSub }) {
   const [editing, setEditing] = useState(false)
   const [parentVal, setParentVal] = useState(cat.nom)
   const [showAddSub, setShowAddSub] = useState(false)
@@ -98,8 +130,11 @@ function CategoryCard({ cat, onRenameParent, onDeleteParent, onAddSub, onRenameS
             <SubcategoryRow
               key={sub.id}
               sub={sub}
+              currentParentId={cat.id}
+              allParents={allParents}
               onRename={onRenameSub}
               onDelete={onDeleteSub}
+              onMove={onMoveSub}
             />
           ))}
         </ul>
@@ -362,6 +397,20 @@ export function CategoriesView() {
     }
   }
 
+  const moveSub = async (id, newParentId) => {
+    try {
+      await apiFetch(`/api/categories/${id}/move`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_id: newParentId }),
+      })
+      load()
+      toast('Sous-catégorie déplacée', 'success')
+    } catch {
+      toast('Erreur', 'error')
+    }
+  }
+
   const deleteSub = async (id, nom) => {
     if (!window.confirm(`Supprimer la sous-catégorie "${nom}" ?`)) return
     try {
@@ -388,11 +437,13 @@ export function CategoriesView() {
         <CategoryCard
           key={cat.id}
           cat={cat}
+          allParents={categories}
           onRenameParent={renameCategory}
           onDeleteParent={deleteParent}
           onAddSub={addSub}
           onRenameSub={renameCategory}
           onDeleteSub={deleteSub}
+          onMoveSub={moveSub}
         />
       ))}
 

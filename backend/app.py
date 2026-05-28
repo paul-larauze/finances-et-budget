@@ -1068,6 +1068,46 @@ def rename_category(cid):
     return jsonify({"ok": True})
 
 
+@app.route("/api/categories/<int:cid>/move", methods=["PATCH"])
+@login_required
+def move_category(cid):
+    data = request.json
+    new_parent_id = data.get("parent_id")
+    if not new_parent_id:
+        return jsonify({"error": "parent_id requis"}), 400
+    uid = g.user_id
+    conn = get_db()
+    cat = conn.execute(
+        "SELECT * FROM categories WHERE id=? AND user_id=?", (cid, uid)
+    ).fetchone()
+    if not cat:
+        conn.close()
+        return jsonify({"error": "Catégorie introuvable"}), 404
+    if cat["parent_id"] is None:
+        conn.close()
+        return jsonify({"error": "Impossible de déplacer une catégorie parente"}), 400
+    # Verify target parent exists and belongs to user
+    parent = conn.execute(
+        "SELECT id FROM categories WHERE id=? AND user_id=? AND parent_id IS NULL",
+        (new_parent_id, uid)
+    ).fetchone()
+    if not parent:
+        conn.close()
+        return jsonify({"error": "Catégorie cible introuvable"}), 404
+    # Assign to end of target parent's children
+    max_pos = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM categories WHERE user_id=? AND parent_id=?",
+        (uid, new_parent_id)
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE categories SET parent_id=?, position=? WHERE id=? AND user_id=?",
+        (new_parent_id, max_pos + 1, cid, uid)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/categories/<int:cid>", methods=["DELETE"])
 @login_required
 def delete_category(cid):
