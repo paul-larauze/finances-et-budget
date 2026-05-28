@@ -32,11 +32,29 @@ ChartJS.register(
 const PALETTE_LIVRETS = ['#16a34a', '#4ade80', '#86efac', '#bbf7d0', '#a7f3d0']
 const PALETTE_BOURSE = ['#2563eb', '#7c3aed', '#db2777', '#d97706', '#0891b2', '#dc2626', '#059669']
 
+// Clic légende : isole le dataset cliqué ; second clic = tout rétablir
+function soloLegendClick(_e, legendItem, legend) {
+  const chart = legend.chart
+  const idx = legendItem.datasetIndex
+  const allOthersHidden = chart.data.datasets.every((_, i) =>
+    i === idx || !chart.isDatasetVisible(i)
+  )
+  chart.data.datasets.forEach((_, i) => {
+    allOthersHidden ? chart.show(i) : (i === idx ? chart.show(i) : chart.hide(i))
+  })
+  chart.update()
+}
+
+const LEGEND_SOLO = {
+  position: 'bottom',
+  onClick: soloLegendClick,
+}
+
 const CHART_OPTIONS_BASE = {
   responsive: true,
   maintainAspectRatio: true,
   plugins: {
-    legend: { position: 'bottom' },
+    legend: LEGEND_SOLO,
   },
 }
 
@@ -60,7 +78,7 @@ const DOUGHNUT_OPTIONS = {
   ...CHART_OPTIONS_BASE,
   plugins: {
     ...CHART_OPTIONS_BASE.plugins,
-    legend: { position: 'bottom' },
+    legend: LEGEND_SOLO,
   },
 }
 

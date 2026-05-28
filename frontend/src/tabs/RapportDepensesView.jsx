@@ -121,6 +121,17 @@ export function RapportDepensesView({ accountType }) {
       legend: {
         position: 'bottom',
         labels: { font: { size: 10 }, boxWidth: 12, padding: 8 },
+        onClick: (_e, legendItem, legend) => {
+          const chart = legend.chart
+          const idx = legendItem.datasetIndex
+          const allOthersHidden = chart.data.datasets.every((_, i) =>
+            i === idx || !chart.isDatasetVisible(i)
+          )
+          chart.data.datasets.forEach((_, i) => {
+            allOthersHidden ? chart.show(i) : (i === idx ? chart.show(i) : chart.hide(i))
+          })
+          chart.update()
+        },
       },
       tooltip: {
         callbacks: {
