@@ -184,6 +184,9 @@ function AdminPanel({ onClose, currentUsername }) {
   const [adminTab, setAdminTab] = useState('users')
   const [generatedLink, setGeneratedLink] = useState(null)
   const [copied, setCopied] = useState(false)
+  // link tab state
+  const [linkTarget, setLinkTarget] = useState({})   // { uid: targetUid|'' }
+  const [linking, setLinking] = useState(null)
   const toast = useToast()
 
   useEffect(() => {
@@ -191,7 +194,13 @@ function AdminPanel({ onClose, currentUsername }) {
     loadInvites()
   }, [])
 
-  const loadUsers = () => apiFetch('/api/auth/users').then(setUsers).catch(() => {})
+  const loadUsers = () => apiFetch('/api/auth/users').then(u => {
+    setUsers(u)
+    // Init linkTarget from current data_owner_id
+    const init = {}
+    u.forEach(usr => { init[usr.id] = usr.data_owner_id ?? '' })
+    setLinkTarget(init)
+  }).catch(() => {})
   const loadInvites = () => apiFetch('/api/auth/invites').then(setInvites).catch(() => {})
 
   const generateInvite = async () => {
@@ -211,6 +220,24 @@ function AdminPanel({ onClose, currentUsername }) {
       }
     } catch {
       toast('Erreur lors de la génération du lien', 'error')
+    }
+  }
+
+  const linkUser = async (uid) => {
+    const target = linkTarget[uid]
+    setLinking(uid)
+    try {
+      await apiFetch(`/api/auth/users/${uid}/link`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data_owner_id: target === '' ? null : Number(target) }),
+      })
+      toast(target === '' ? 'Compte rendu indépendant' : 'Comptes liés — reconnexion nécessaire pour l\'utilisateur concerné', 'success')
+      loadUsers()
+    } catch (e) {
+      toast(e.message || 'Erreur', 'error')
+    } finally {
+      setLinking(null)
     }
   }
 
@@ -245,6 +272,10 @@ function AdminPanel({ onClose, currentUsername }) {
             className={`btn-sm ${adminTab === 'invites' ? 'btn-primary' : 'btn-outline'}`}
             onClick={() => setAdminTab('invites')}
           >Invitations</button>
+          <button
+            className={`btn-sm ${adminTab === 'links' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setAdminTab('links')}
+          >🔗 Liens</button>
         </div>
 
         {adminTab === 'users' && (
@@ -281,6 +312,42 @@ function AdminPanel({ onClose, currentUsername }) {
               ))}
             </div>
           </>
+        )}
+
+        {adminTab === 'links' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>
+              Lier deux comptes leur permet de partager exactement le même espace de données.
+              L'utilisateur lié doit se reconnecter pour que le changement prenne effet.
+            </p>
+            {users.map(u => (
+              <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ flex: '0 0 120px', fontWeight: 500, fontSize: 14 }}>
+                  {u.username}
+                  {u.username === currentUsername && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>(vous)</span>}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--muted)', margin: '0 4px' }}>→ données de</span>
+                <select
+                  value={linkTarget[u.id] ?? ''}
+                  onChange={e => setLinkTarget(prev => ({ ...prev, [u.id]: e.target.value }))}
+                  style={{ flex: 1, fontSize: 13, padding: '5px 8px', height: 34, borderRadius: 8, border: '1px solid var(--border)' }}
+                >
+                  <option value="">— Indépendant (ses propres données) —</option>
+                  {users.filter(o => o.id !== u.id).map(o => (
+                    <option key={o.id} value={o.id}>{o.username}</option>
+                  ))}
+                </select>
+                <button
+                  className="btn-sm btn-primary"
+                  onClick={() => linkUser(u.id)}
+                  disabled={linking === u.id}
+                  style={{ height: 34, padding: '0 12px', fontSize: 13 }}
+                >
+                  {linking === u.id ? '…' : 'Appliquer'}
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         {adminTab === 'invites' && (

@@ -191,6 +191,11 @@ def init_db():
     if _table_exists(c, "monthly_entries") and not _table_has_column(c, "monthly_entries", "user_id"):
         _run_multiuser_migration(conn, c)
 
+    # ── MIGRATION: data_owner_id ─────────────────────────────────────────────────
+    if not _table_has_column(c, "users", "data_owner_id"):
+        c.execute("ALTER TABLE users ADD COLUMN data_owner_id INTEGER")
+        conn.commit()
+
     # ── DATA TABLES ──────────────────────────────────────────────────────────────
     c.executescript("""
     CREATE TABLE IF NOT EXISTS monthly_entries (

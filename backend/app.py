@@ -26,7 +26,8 @@ def login_required(f):
         user_id = session.get("user_id")
         if not user_id:
             return jsonify({"error": "Non authentifié"}), 401
-        g.user_id = user_id
+        g.user_id = user_id                                      # identité de connexion
+        g.data_uid = session.get("data_uid") or user_id         # espace de données
         g.is_admin = session.get("is_admin", False)
         return f(*args, **kwargs)
     return decorated
@@ -41,6 +42,7 @@ def admin_required(f):
         if not session.get("is_admin"):
             return jsonify({"error": "Accès réservé à l'administrateur"}), 403
         g.user_id = user_id
+        g.data_uid = session.get("data_uid") or user_id
         g.is_admin = True
         return f(*args, **kwargs)
     return decorated
@@ -64,6 +66,7 @@ def login():
     session.clear()
     session["user_id"] = user["id"]
     session["is_admin"] = bool(user["is_admin"])
+    session["data_uid"] = user["data_owner_id"] or user["id"]
     return jsonify({"ok": True, "username": user["username"], "is_admin": bool(user["is_admin"])})
 
 
@@ -155,6 +158,7 @@ def register():
     session.clear()
     session["user_id"] = new_user_id
     session["is_admin"] = bool(is_admin)
+    session["data_uid"] = new_user_id   # nouveau compte → espace propre par défaut
     return jsonify({"ok": True, "username": username, "is_admin": bool(is_admin)}), 201
 
 
@@ -165,10 +169,44 @@ def register():
 def list_users():
     conn = get_db()
     users = conn.execute(
-        "SELECT id, username, is_admin, created_at FROM users ORDER BY id"
+        "SELECT id, username, is_admin, created_at, data_owner_id FROM users ORDER BY id"
     ).fetchall()
     conn.close()
     return jsonify([dict(u) for u in users])
+
+
+@app.route("/api/auth/users/<int:uid>/link", methods=["PATCH"])
+@admin_required
+def link_user_data(uid):
+    """
+    Lie le compte uid à un espace de données.
+    Body: { "data_owner_id": <int|null> }
+      - int  → uid utilisera les données de data_owner_id
+      - null → uid retrouve son espace propre
+    """
+    data = request.json
+    target = data.get("data_owner_id")  # None = indépendant
+
+    conn = get_db()
+    user = conn.execute("SELECT id FROM users WHERE id=?", (uid,)).fetchone()
+    if not user:
+        conn.close()
+        return jsonify({"error": "Utilisateur introuvable"}), 404
+
+    if target is not None:
+        target = int(target)
+        if target == uid:
+            conn.close()
+            return jsonify({"error": "Un utilisateur ne peut pas être lié à lui-même"}), 400
+        owner = conn.execute("SELECT id FROM users WHERE id=?", (target,)).fetchone()
+        if not owner:
+            conn.close()
+            return jsonify({"error": "Utilisateur cible introuvable"}), 404
+
+    conn.execute("UPDATE users SET data_owner_id=? WHERE id=?", (target, uid))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/auth/users/<int:uid>", methods=["DELETE"])
@@ -232,7 +270,7 @@ def list_invites():
 def get_monthly():
     annee = request.args.get("annee", type=int)
     mois = request.args.get("mois", type=int)
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     c = conn.cursor()
     entry = c.execute(
@@ -269,7 +307,7 @@ def save_monthly():
     annee, mois = data["annee"], data["mois"]
     salaire = data["salaire"]
     rep = data["repartition"]
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     c = conn.cursor()
     c.execute(
@@ -291,7 +329,7 @@ def save_monthly():
 @app.route("/api/month/<int:annee>/<int:mois>", methods=["DELETE"])
 @login_required
 def delete_month(annee, mois):
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     conn.execute("DELETE FROM monthly_entries WHERE user_id=? AND annee=? AND mois=?", (uid, annee, mois))
     conn.execute("DELETE FROM repartition WHERE user_id=? AND annee=? AND mois=?", (uid, annee, mois))
@@ -308,7 +346,7 @@ def delete_month(annee, mois):
 def get_prelevements():
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM prelevements_auto WHERE user_id=? ORDER BY id", (g.user_id,)
+        "SELECT * FROM prelevements_auto WHERE user_id=? ORDER BY id", (g.data_uid,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -318,7 +356,7 @@ def get_prelevements():
 @login_required
 def save_prelevement():
     data = request.json
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     if data.get("id"):
         conn.execute(
@@ -340,7 +378,7 @@ def save_prelevement():
 @login_required
 def delete_prelevement(pid):
     conn = get_db()
-    conn.execute("DELETE FROM prelevements_auto WHERE id=? AND user_id=?", (pid, g.user_id))
+    conn.execute("DELETE FROM prelevements_auto WHERE id=? AND user_id=?", (pid, g.data_uid))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -353,7 +391,7 @@ def delete_prelevement(pid):
 def get_virements_fixes():
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM virements_fixes WHERE user_id=? ORDER BY id", (g.user_id,)
+        "SELECT * FROM virements_fixes WHERE user_id=? ORDER BY id", (g.data_uid,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -363,7 +401,7 @@ def get_virements_fixes():
 @login_required
 def save_virement_fixe():
     data = request.json
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     if data.get("id"):
         conn.execute(
@@ -384,7 +422,7 @@ def save_virement_fixe():
 @login_required
 def delete_virement_fixe(vid):
     conn = get_db()
-    conn.execute("DELETE FROM virements_fixes WHERE id=? AND user_id=?", (vid, g.user_id))
+    conn.execute("DELETE FROM virements_fixes WHERE id=? AND user_id=?", (vid, g.data_uid))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -397,7 +435,7 @@ def delete_virement_fixe(vid):
 def get_virements_cj():
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM virements_cj WHERE user_id=? ORDER BY id", (g.user_id,)
+        "SELECT * FROM virements_cj WHERE user_id=? ORDER BY id", (g.data_uid,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -407,7 +445,7 @@ def get_virements_cj():
 @login_required
 def save_virement_cj():
     data = request.json
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     if data.get("id"):
         conn.execute(
@@ -429,7 +467,7 @@ def save_virement_cj():
 @login_required
 def delete_virement_cj(cid):
     conn = get_db()
-    conn.execute("DELETE FROM virements_cj WHERE id=? AND user_id=?", (cid, g.user_id))
+    conn.execute("DELETE FROM virements_cj WHERE id=? AND user_id=?", (cid, g.data_uid))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -442,7 +480,7 @@ def delete_virement_cj(cid):
 def get_supports():
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM supports WHERE user_id=? ORDER BY categorie, id", (g.user_id,)
+        "SELECT * FROM supports WHERE user_id=? ORDER BY categorie, id", (g.data_uid,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -455,7 +493,7 @@ def add_support():
     conn = get_db()
     conn.execute(
         "INSERT INTO supports (user_id, nom, categorie) VALUES (?,?,?)",
-        (g.user_id, data["nom"], data["categorie"]),
+        (g.data_uid, data["nom"], data["categorie"]),
     )
     conn.commit()
     conn.close()
@@ -466,7 +504,7 @@ def add_support():
 @login_required
 def delete_support(sid):
     conn = get_db()
-    conn.execute("DELETE FROM supports WHERE id=? AND user_id=?", (sid, g.user_id))
+    conn.execute("DELETE FROM supports WHERE id=? AND user_id=?", (sid, g.data_uid))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -479,7 +517,7 @@ def delete_support(sid):
 def get_placements():
     annee = request.args.get("annee", type=int)
     mois = request.args.get("mois", type=int)
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     supports = conn.execute(
         "SELECT * FROM supports WHERE user_id=? ORDER BY categorie, id", (uid,)
@@ -514,7 +552,7 @@ def get_placements():
 def save_placements():
     data = request.json
     annee, mois = data["annee"], data["mois"]
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     for item in data["placements"]:
         conn.execute(
@@ -543,7 +581,7 @@ def get_historique():
         GROUP BY p.annee, p.mois
         HAVING SUM(p.montant) > 0
         ORDER BY p.annee, p.mois
-    """, (g.user_id,)).fetchall()
+    """, (g.data_uid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -553,7 +591,7 @@ def get_historique():
 @app.route("/api/graphes/evolution", methods=["GET"])
 @login_required
 def get_graphes_evolution():
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     rows = conn.execute("""
         SELECT annee, mois, support, categorie, montant
@@ -663,7 +701,7 @@ def get_rapport():
     if not selected_months:
         selected_months = [date.today().month]
 
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
 
     # Build month filter: date_op LIKE 'YYYY-MM-%'
@@ -770,7 +808,7 @@ def get_transactions():
     annee = request.args.get("annee", type=int)
     mois = request.args.get("mois", type=int)
     account_type = request.args.get("account_type", "perso")
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     if annee and mois:
         prefix = f"{annee}-{mois:02d}"
@@ -868,7 +906,7 @@ def import_transactions():
         return jsonify({"error": "Fichier manquant"}), 400
 
     account_type = request.form.get("account_type", "perso")
-    uid = g.user_id
+    uid = g.data_uid
 
     content = file.read().decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(content), delimiter=";")
@@ -927,7 +965,7 @@ def import_transactions():
 @login_required
 def delete_transaction(tid):
     conn = get_db()
-    conn.execute("DELETE FROM transactions WHERE id=? AND user_id=?", (tid, g.user_id))
+    conn.execute("DELETE FROM transactions WHERE id=? AND user_id=?", (tid, g.data_uid))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -938,7 +976,7 @@ def delete_transaction(tid):
 def update_transaction_category(tid):
     data = request.json
     category = data.get("category")
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     conn.execute(
         "UPDATE transactions SET my_category=? WHERE id=? AND user_id=?", (category, tid, uid)
@@ -959,7 +997,7 @@ def update_transaction_category(tid):
 @app.route("/api/transactions/recategorize", methods=["POST"])
 @login_required
 def recategorize_all():
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     txs = conn.execute(
         "SELECT id, supplier, label, category_parent FROM transactions WHERE user_id=?", (uid,)
@@ -976,7 +1014,7 @@ def recategorize_all():
 @app.route("/api/categories", methods=["GET"])
 @login_required
 def get_categories():
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     parents = conn.execute(
         "SELECT * FROM categories WHERE user_id=? AND parent_id IS NULL ORDER BY position, id",
@@ -1009,7 +1047,7 @@ def add_category():
     parent_id = data.get("parent_id")  # None = top-level
     if not nom:
         return jsonify({"error": "Nom requis"}), 400
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     # Position = max existing + 1
     if parent_id:
@@ -1039,7 +1077,7 @@ def rename_category(cid):
     nom = (data.get("nom") or "").strip()
     if not nom:
         return jsonify({"error": "Nom requis"}), 400
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     old = conn.execute(
         "SELECT nom FROM categories WHERE id=? AND user_id=?", (cid, uid)
@@ -1075,7 +1113,7 @@ def move_category(cid):
     new_parent_id = data.get("parent_id")
     if not new_parent_id:
         return jsonify({"error": "parent_id requis"}), 400
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     cat = conn.execute(
         "SELECT * FROM categories WHERE id=? AND user_id=?", (cid, uid)
@@ -1111,7 +1149,7 @@ def move_category(cid):
 @app.route("/api/categories/<int:cid>", methods=["DELETE"])
 @login_required
 def delete_category(cid):
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     cat = conn.execute(
         "SELECT * FROM categories WHERE id=? AND user_id=?", (cid, uid)
@@ -1134,7 +1172,7 @@ def delete_category(cid):
 @app.route("/api/categories/orphans", methods=["GET"])
 @login_required
 def get_orphan_categories():
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     # All valid subcategory names for this user
     valid = {
@@ -1185,7 +1223,7 @@ def remap_categories():
     mappings = data.get("mappings", [])  # [{old: str, new: str}]
     if not mappings:
         return jsonify({"error": "Aucun mapping fourni"}), 400
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     updated = 0
     for m in mappings:
@@ -1217,7 +1255,7 @@ def get_account_tabs():
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM account_tabs WHERE user_id=? ORDER BY position, id",
-        (g.user_id,),
+        (g.data_uid,),
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -1239,7 +1277,7 @@ def add_account_tab():
     if not slug:
         return jsonify({"error": "Nom invalide"}), 400
 
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     max_pos = conn.execute(
         "SELECT COALESCE(MAX(position), -1) FROM account_tabs WHERE user_id=?", (uid,)
@@ -1261,7 +1299,7 @@ def add_account_tab():
 @app.route("/api/account-tabs/<int:tab_id>", methods=["DELETE"])
 @login_required
 def delete_account_tab(tab_id):
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     tab = conn.execute(
         "SELECT * FROM account_tabs WHERE id=? AND user_id=?", (tab_id, uid)
@@ -1292,7 +1330,7 @@ def list_users_for_sharing():
     conn = get_db()
     users = conn.execute(
         "SELECT id, username FROM users WHERE id != ? ORDER BY username",
-        (g.user_id,),
+        (g.data_uid,),
     ).fetchall()
     conn.close()
     return jsonify([dict(u) for u in users])
@@ -1301,7 +1339,7 @@ def list_users_for_sharing():
 @app.route("/api/categories/import-from/<int:owner_id>", methods=["POST"])
 @login_required
 def import_categories_from(owner_id):
-    uid = g.user_id
+    uid = g.data_uid
     if owner_id == uid:
         return jsonify({"error": "Impossible d'importer depuis votre propre compte"}), 400
 
@@ -1378,7 +1416,7 @@ def import_categories_from(owner_id):
 def get_rules():
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM categorization_rules WHERE user_id=? ORDER BY id", (g.user_id,)
+        "SELECT * FROM categorization_rules WHERE user_id=? ORDER BY id", (g.data_uid,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -1388,7 +1426,7 @@ def get_rules():
 @login_required
 def add_rule():
     data = request.json
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     conn.execute(
         "INSERT INTO categorization_rules (user_id, keyword, category) VALUES (?,?,?) "
@@ -1405,7 +1443,7 @@ def add_rule():
 def delete_rule(rid):
     conn = get_db()
     conn.execute(
-        "DELETE FROM categorization_rules WHERE id=? AND user_id=?", (rid, g.user_id)
+        "DELETE FROM categorization_rules WHERE id=? AND user_id=?", (rid, g.data_uid)
     )
     conn.commit()
     conn.close()
@@ -1417,7 +1455,7 @@ def delete_rule(rid):
 @app.route("/api/export", methods=["GET"])
 @login_required
 def export_data():
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     data = {
         "monthly_entries": [dict(r) for r in conn.execute(
@@ -1456,7 +1494,7 @@ def export_data():
 @login_required
 def import_data():
     data = request.json
-    uid = g.user_id
+    uid = g.data_uid
     conn = get_db()
     c = conn.cursor()
 
