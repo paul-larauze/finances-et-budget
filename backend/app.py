@@ -1211,6 +1211,81 @@ def remap_categories():
     return jsonify({"ok": True, "updated": updated})
 
 
+@app.route("/api/account-tabs", methods=["GET"])
+@login_required
+def get_account_tabs():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM account_tabs WHERE user_id=? ORDER BY position, id",
+        (g.user_id,),
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/account-tabs", methods=["POST"])
+@login_required
+def add_account_tab():
+    data = request.json
+    label = (data.get("label") or "").strip()
+    if not label:
+        return jsonify({"error": "Nom requis"}), 400
+
+    # Auto-generate slug from label
+    import unicodedata, re
+    slug = unicodedata.normalize("NFD", label.lower())
+    slug = "".join(c for c in slug if unicodedata.category(c) != "Mn")
+    slug = re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
+    if not slug:
+        return jsonify({"error": "Nom invalide"}), 400
+
+    uid = g.user_id
+    conn = get_db()
+    max_pos = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM account_tabs WHERE user_id=?", (uid,)
+    ).fetchone()[0]
+    try:
+        cursor = conn.execute(
+            "INSERT INTO account_tabs (user_id, label, account_type, position) VALUES (?,?,?,?)",
+            (uid, label, slug, max_pos + 1),
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+    except Exception:
+        conn.close()
+        return jsonify({"error": "Un onglet avec ce nom existe déjà"}), 409
+    conn.close()
+    return jsonify({"ok": True, "id": new_id, "account_type": slug}), 201
+
+
+@app.route("/api/account-tabs/<int:tab_id>", methods=["DELETE"])
+@login_required
+def delete_account_tab(tab_id):
+    uid = g.user_id
+    conn = get_db()
+    tab = conn.execute(
+        "SELECT * FROM account_tabs WHERE id=? AND user_id=?", (tab_id, uid)
+    ).fetchone()
+    if not tab:
+        conn.close()
+        return jsonify({"error": "Onglet introuvable"}), 404
+
+    count = conn.execute(
+        "SELECT COUNT(*) FROM transactions WHERE user_id=? AND account_type=?",
+        (uid, tab["account_type"]),
+    ).fetchone()[0]
+    if count > 0:
+        conn.close()
+        return jsonify({
+            "error": f"Impossible de supprimer : {count} transaction(s) sont rattachées à cet onglet."
+        }), 409
+
+    conn.execute("DELETE FROM account_tabs WHERE id=? AND user_id=?", (tab_id, uid))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/users", methods=["GET"])
 @login_required
 def list_users_for_sharing():

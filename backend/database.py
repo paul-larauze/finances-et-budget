@@ -295,6 +295,24 @@ def init_db():
     );
     """)
 
+    # ── MIGRATION: account_tabs ──────────────────────────────────────────────────
+    if not _table_exists(c, "account_tabs"):
+        c.execute("""
+            CREATE TABLE account_tabs (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                account_type TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(user_id, account_type)
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_account_tabs_uid ON account_tabs(user_id)")
+        # Seed existing users
+        for row in c.execute("SELECT id FROM users").fetchall():
+            _seed_account_tabs_for_user(c, row[0])
+        conn.commit()
+
     # ── MIGRATION: categories v2 (hierarchical, per-user) ───────────────────────
     if _table_exists(c, "categories"):
         _migrate_to_categories_v2(conn, c)
@@ -387,6 +405,23 @@ DEFAULT_SUPPORTS = [
 ]
 
 
+DEFAULT_ACCOUNT_TABS = [
+    ("Compte perso", "perso"),
+    ("Compte joint", "joint"),
+]
+
+
+def _seed_account_tabs_for_user(c, user_id):
+    c.execute("SELECT COUNT(*) FROM account_tabs WHERE user_id=?", (user_id,))
+    if c.fetchone()[0] > 0:
+        return
+    for pos, (label, account_type) in enumerate(DEFAULT_ACCOUNT_TABS):
+        c.execute(
+            "INSERT OR IGNORE INTO account_tabs (user_id, label, account_type, position) VALUES (?,?,?,?)",
+            (user_id, label, account_type, pos),
+        )
+
+
 def seed_new_user(conn, user_id):
     """Seeds default categorization rules, supports and categories for a new user."""
     c = conn.cursor()
@@ -406,5 +441,6 @@ def seed_new_user(conn, user_id):
         )
 
     _seed_categories_for_user(c, user_id)
+    _seed_account_tabs_for_user(c, user_id)
 
     conn.commit()

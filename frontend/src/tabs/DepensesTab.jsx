@@ -30,6 +30,132 @@ function CategorySelect({ categories, value, onChange, style }) {
   )
 }
 
+function AccountTabsBar({ accountType, onSwitch, onTabsChange }) {
+  const showToast = useToast()
+  const [tabs, setTabs] = useState([])
+  const [adding, setAdding] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const loadTabs = useCallback(async () => {
+    try {
+      const data = await apiFetch('/api/account-tabs')
+      setTabs(data)
+      if (onTabsChange) onTabsChange(data)
+    } catch {
+      showToast('Erreur chargement des onglets', 'error')
+    }
+  }, [])
+
+  useEffect(() => { loadTabs() }, [loadTabs])
+
+  const addTab = async (e) => {
+    e.preventDefault()
+    if (!newLabel.trim()) return
+    setSaving(true)
+    try {
+      await apiFetch('/api/account-tabs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: newLabel.trim() }),
+      })
+      setNewLabel('')
+      setAdding(false)
+      await loadTabs()
+      showToast('Onglet ajouté', 'success')
+    } catch (err) {
+      showToast(err?.message || 'Erreur', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteTab = async (tab) => {
+    if (!window.confirm(`Supprimer l'onglet "${tab.label}" ?`)) return
+    try {
+      await apiFetch(`/api/account-tabs/${tab.id}`, { method: 'DELETE' })
+      const remaining = tabs.filter(t => t.id !== tab.id)
+      setTabs(remaining)
+      if (onTabsChange) onTabsChange(remaining)
+      if (accountType === tab.account_type && remaining.length > 0) {
+        onSwitch(remaining[0].account_type)
+      }
+      showToast('Onglet supprimé', 'success')
+    } catch (err) {
+      // Server returns error message when transactions exist
+      showToast(err?.message || 'Impossible de supprimer cet onglet', 'error')
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', background: 'white', borderRadius: 12, padding: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', gap: 4, flexWrap: 'wrap' }}>
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            style={{
+              flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: 4,
+              borderRadius: 8, padding: '0 4px 0 0',
+              background: accountType === tab.account_type ? 'var(--primary)' : 'transparent',
+              transition: 'all 0.15s',
+            }}
+          >
+            <button
+              onClick={() => onSwitch(tab.account_type)}
+              style={{
+                flex: 1, padding: '10px 8px', border: 'none', background: 'transparent',
+                fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                color: accountType === tab.account_type ? 'white' : 'var(--muted)',
+              }}
+            >
+              {tab.label}
+            </button>
+            {tabs.length > 1 && (
+              <button
+                onClick={() => deleteTab(tab)}
+                title="Supprimer cet onglet"
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, lineHeight: 1,
+                  color: accountType === tab.account_type ? 'rgba(255,255,255,0.7)' : '#cbd5e1',
+                  padding: '2px 2px',
+                }}
+              >✕</button>
+            )}
+          </div>
+        ))}
+
+        {/* Add button */}
+        {!adding && (
+          <button
+            onClick={() => setAdding(true)}
+            style={{
+              padding: '10px 10px', border: 'none', background: 'transparent',
+              color: 'var(--primary)', fontWeight: 700, fontSize: 16, cursor: 'pointer', borderRadius: 8,
+            }}
+            title="Ajouter un onglet"
+          >+</button>
+        )}
+      </div>
+
+      {adding && (
+        <form onSubmit={addTab} style={{ display: 'flex', gap: 6 }}>
+          <input
+            autoFocus
+            value={newLabel}
+            onChange={e => setNewLabel(e.target.value)}
+            placeholder="Nom du compte (ex: Livret A)"
+            style={{ flex: 1, fontSize: 13, padding: '8px 10px', height: 36 }}
+          />
+          <button type="submit" className="btn btn-primary btn-sm" style={{ height: 36, padding: '0 14px' }} disabled={saving}>
+            {saving ? '…' : 'Ajouter'}
+          </button>
+          <button type="button" className="btn btn-outline btn-sm" style={{ height: 36 }} onClick={() => { setAdding(false); setNewLabel('') }}>✕</button>
+        </form>
+      )}
+    </div>
+  )
+}
+
 const now = new Date()
 
 function shortLabel(label) {
@@ -251,23 +377,11 @@ export function DepensesTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-      {/* Account toggle */}
-      <div style={{ display: 'flex', background: 'white', borderRadius: 12, padding: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', gap: 4 }}>
-        {[{ id: 'perso', label: 'Compte perso' }, { id: 'joint', label: 'Compte joint' }].map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => switchAccount(id)}
-            style={{
-              flex: 1, padding: '10px 0', border: 'none', borderRadius: 8, fontWeight: 600,
-              fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
-              background: accountType === id ? 'var(--primary)' : 'transparent',
-              color: accountType === id ? 'white' : 'var(--muted)',
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Account tabs */}
+      <AccountTabsBar
+        accountType={accountType}
+        onSwitch={switchAccount}
+      />
 
       {/* View toggle */}
       <div style={{ display: 'flex', gap: 6 }}>
