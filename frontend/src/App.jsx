@@ -5,7 +5,7 @@ import { ToastContainer, useToast } from './components/Toast'
 import { DepensesTab } from './tabs/DepensesTab'
 import { EpargneTab } from './tabs/EpargneTab'
 import { VirementsTab } from './tabs/VirementsTab'
-import { apiFetch } from './api/client'
+import { apiFetch, useLocalStorage } from './api/client'
 
 // ── LOGIN ──────────────────────────────────────────────────────────────────────
 
@@ -315,7 +315,7 @@ function AdminPanel({ onClose, currentUsername }) {
 // ── APP ────────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [tab, setTab] = useState('depenses')
+  const [tab, setTab] = useLocalStorage('app.tab', 'depenses')
   // null=loading, false=not authenticated, { username, is_admin }=authenticated
   const [user, setUser] = useState(null)
   const [firstUser, setFirstUser] = useState(false)

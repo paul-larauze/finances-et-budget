@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { apiFetch, fmt, MOIS } from '../api/client.js'
+import { apiFetch, fmt, MOIS, useLocalStorage } from '../api/client.js'
 import { useToast } from '../components/Toast.jsx'
 import { RapportDepensesView } from './RapportDepensesView.jsx'
 import { CategoriesView } from './CategoriesView.jsx'
@@ -169,8 +169,8 @@ export function DepensesTab() {
   const [transactions, setTransactions] = useState([])
   const [categories, setCategories] = useState([])
   const [rules, setRules] = useState([])
-  const [accountType, setAccountType] = useState('perso')
-  const [view, setView] = useState('mouvements')
+  const [accountType, setAccountType] = useLocalStorage('depenses.accountType', 'perso')
+  const [view, setView] = useLocalStorage('depenses.view', 'mouvements')
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
