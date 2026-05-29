@@ -42,10 +42,14 @@ function AccountTabsBar({ accountType, onSwitch, onTabsChange }) {
       const data = await apiFetch('/api/account-tabs')
       setTabs(data)
       if (onTabsChange) onTabsChange(data)
+      // Si le compte actif n'existe plus dans la liste, basculer sur le premier
+      if (data.length > 0 && !data.find(t => t.account_type === accountType)) {
+        onSwitch(data[0].account_type)
+      }
     } catch {
       showToast('Erreur chargement des onglets', 'error')
     }
-  }, [])
+  }, [accountType])
 
   useEffect(() => { loadTabs() }, [loadTabs])
 
@@ -70,6 +74,29 @@ function AccountTabsBar({ accountType, onSwitch, onTabsChange }) {
     }
   }
 
+  const moveTab = async (tab, direction) => {
+    // Mise à jour optimiste locale
+    const idx = tabs.findIndex(t => t.id === tab.id)
+    const swapIdx = direction === 'left' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= tabs.length) return
+    const next = [...tabs]
+    ;[next[idx], next[swapIdx]] = [next[swapIdx], next[idx]]
+    setTabs(next)
+    if (onTabsChange) onTabsChange(next)
+    // Si on déplace le premier tab, le nouveau premier devient le défaut
+    if (swapIdx === 0 || idx === 0) onSwitch(next[0].account_type)
+    try {
+      await apiFetch(`/api/account-tabs/${tab.id}/move`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction }),
+      })
+    } catch {
+      showToast('Erreur lors du déplacement', 'error')
+      loadTabs() // rollback
+    }
+  }
+
   const deleteTab = async (tab) => {
     if (!window.confirm(`Supprimer l'onglet "${tab.label}" ?`)) return
     try {
@@ -90,39 +117,76 @@ function AccountTabsBar({ accountType, onSwitch, onTabsChange }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', background: 'white', borderRadius: 12, padding: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', gap: 4, flexWrap: 'wrap' }}>
-        {tabs.map(tab => (
-          <div
-            key={tab.id}
-            style={{
-              flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: 4,
-              borderRadius: 8, padding: '0 4px 0 0',
-              background: accountType === tab.account_type ? 'var(--primary)' : 'transparent',
-              transition: 'all 0.15s',
-            }}
-          >
-            <button
-              onClick={() => onSwitch(tab.account_type)}
+        {tabs.map((tab, idx) => {
+          const isActive = accountType === tab.account_type
+          const isFirst = idx === 0
+          const isLast = idx === tabs.length - 1
+          const btnColor = isActive ? 'rgba(255,255,255,0.6)' : '#cbd5e1'
+          return (
+            <div
+              key={tab.id}
               style={{
-                flex: 1, padding: '10px 8px', border: 'none', background: 'transparent',
-                fontWeight: 600, fontSize: 14, cursor: 'pointer',
-                color: accountType === tab.account_type ? 'white' : 'var(--muted)',
+                flex: '1 1 auto', display: 'flex', alignItems: 'center',
+                borderRadius: 8, padding: '0 2px 0 2px',
+                background: isActive ? 'var(--primary)' : 'transparent',
+                transition: 'all 0.15s',
               }}
             >
-              {tab.label}
-            </button>
-            {tabs.length > 1 && (
+              {/* Flèche gauche */}
+              {tabs.length > 1 && (
+                <button
+                  onClick={() => moveTab(tab, 'left')}
+                  disabled={isFirst}
+                  title="Déplacer à gauche"
+                  style={{
+                    background: 'none', border: 'none', cursor: isFirst ? 'default' : 'pointer',
+                    fontSize: 11, lineHeight: 1, padding: '2px 3px',
+                    color: isFirst ? 'transparent' : btnColor,
+                  }}
+                >◀</button>
+              )}
+
+              {/* Label cliquable */}
               <button
-                onClick={() => deleteTab(tab)}
-                title="Supprimer cet onglet"
+                onClick={() => onSwitch(tab.account_type)}
                 style={{
-                  background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, lineHeight: 1,
-                  color: accountType === tab.account_type ? 'rgba(255,255,255,0.7)' : '#cbd5e1',
-                  padding: '2px 2px',
+                  flex: 1, padding: '10px 4px', border: 'none', background: 'transparent',
+                  fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                  color: isActive ? 'white' : 'var(--muted)',
                 }}
-              >✕</button>
-            )}
-          </div>
-        ))}
+              >
+                {isFirst && <span title="Onglet par défaut" style={{ marginRight: 4, fontSize: 11 }}>★</span>}
+                {tab.label}
+              </button>
+
+              {/* Flèche droite */}
+              {tabs.length > 1 && (
+                <button
+                  onClick={() => moveTab(tab, 'right')}
+                  disabled={isLast}
+                  title="Déplacer à droite"
+                  style={{
+                    background: 'none', border: 'none', cursor: isLast ? 'default' : 'pointer',
+                    fontSize: 11, lineHeight: 1, padding: '2px 3px',
+                    color: isLast ? 'transparent' : btnColor,
+                  }}
+                >▶</button>
+              )}
+
+              {/* Suppression */}
+              {tabs.length > 1 && (
+                <button
+                  onClick={() => deleteTab(tab)}
+                  title="Supprimer cet onglet"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, lineHeight: 1,
+                    color: btnColor, padding: '2px 2px',
+                  }}
+                >✕</button>
+              )}
+            </div>
+          )
+        })}
 
         {/* Add button */}
         {!adding && (

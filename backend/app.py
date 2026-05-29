@@ -1324,6 +1324,40 @@ def delete_account_tab(tab_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/account-tabs/<int:tab_id>/move", methods=["PATCH"])
+@login_required
+def move_account_tab(tab_id):
+    """Swap this tab with its left or right neighbour."""
+    direction = (request.json or {}).get("direction")  # "left" | "right"
+    if direction not in ("left", "right"):
+        return jsonify({"error": "direction doit être 'left' ou 'right'"}), 400
+
+    uid = g.data_uid
+    conn = get_db()
+    tabs = conn.execute(
+        "SELECT id, position FROM account_tabs WHERE user_id=? ORDER BY position, id",
+        (uid,),
+    ).fetchall()
+
+    ids = [t["id"] for t in tabs]
+    if tab_id not in ids:
+        conn.close()
+        return jsonify({"error": "Onglet introuvable"}), 404
+
+    idx = ids.index(tab_id)
+    swap_idx = idx - 1 if direction == "left" else idx + 1
+    if swap_idx < 0 or swap_idx >= len(tabs):
+        conn.close()
+        return jsonify({"ok": True})  # déjà en bout de liste, rien à faire
+
+    a, b = tabs[idx], tabs[swap_idx]
+    conn.execute("UPDATE account_tabs SET position=? WHERE id=?", (b["position"], a["id"]))
+    conn.execute("UPDATE account_tabs SET position=? WHERE id=?", (a["position"], b["id"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/users", methods=["GET"])
 @login_required
 def list_users_for_sharing():
