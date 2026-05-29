@@ -196,19 +196,16 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN data_owner_id INTEGER")
         conn.commit()
 
-    # ── MIGRATION: virement fixe "Compte courant" (100 € par défaut) ─────────────
-    for row in c.execute("SELECT id FROM users").fetchall():
-        uid = row[0]
-        exists = c.execute(
-            "SELECT 1 FROM virements_fixes WHERE user_id=? AND libelle=?",
-            (uid, "Compte courant"),
-        ).fetchone()
-        if not exists:
-            c.execute(
-                "INSERT INTO virements_fixes (user_id, libelle, banque, montant) VALUES (?,?,?,?)",
-                (uid, "Compte courant", "—", 100),
-            )
-    conn.commit()
+    # ── MIGRATION: compte_courant dans repartition ───────────────────────────────
+    # (table créée juste après dans DATA TABLES si elle n'existe pas)
+    if _table_exists(c, "repartition") and not _table_has_column(c, "repartition", "compte_courant"):
+        c.execute("ALTER TABLE repartition ADD COLUMN compte_courant REAL DEFAULT 100")
+        conn.commit()
+
+    # Annuler l'ajout de "Compte courant" en virements fixes (remplacé par repartition)
+    if _table_exists(c, "virements_fixes"):
+        c.execute("DELETE FROM virements_fixes WHERE libelle=?", ("Compte courant",))
+        conn.commit()
 
     # ── DATA TABLES ──────────────────────────────────────────────────────────────
     c.executescript("""
@@ -361,6 +358,10 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_categories_uid         ON categories(user_id);
     """)
 
+    # ── MIGRATION (post-tables): compte_courant pour bases fraîches ──────────────
+    if _table_exists(c, "repartition") and not _table_has_column(c, "repartition", "compte_courant"):
+        c.execute("ALTER TABLE repartition ADD COLUMN compte_courant REAL DEFAULT 100")
+
     conn.commit()
     conn.close()
 
@@ -452,11 +453,6 @@ def seed_new_user(conn, user_id):
             [(user_id, k, v) for k, v in DEFAULT_RULES],
         )
 
-    # Virement fixe "Compte courant" par défaut
-    c.execute(
-        "INSERT OR IGNORE INTO virements_fixes (user_id, libelle, banque, montant) VALUES (?,?,?,?)",
-        (user_id, "Compte courant", "—", 100),
-    )
 
     c.execute("SELECT COUNT(*) FROM supports WHERE user_id=?", (user_id,))
     if c.fetchone()[0] == 0:

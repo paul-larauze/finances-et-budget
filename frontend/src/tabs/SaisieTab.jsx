@@ -6,7 +6,7 @@ import { useToast } from '../components/Toast.jsx'
 const PLACEMENTS_KEYS = ['pea', 'livret_a', 'cto', 'crypto']
 const PLACEMENTS_LABELS = { pea: 'PEA', livret_a: 'Livret A', cto: 'CTO', crypto: 'Cryptos' }
 
-const DEFAULT_REPARTITION = { pea: 0, livret_a: 0, cto: 0, crypto: 0 }
+const DEFAULT_REPARTITION = { pea: 0, livret_a: 0, cto: 0, crypto: 0, compte_courant: 100 }
 
 export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prelevementsData }) {
   const showToast = useToast()
@@ -21,7 +21,8 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
   // Virements fixes déduits du disponible (tous positifs, pas les prélèvements)
   const totalFixes = (virementsFixesData || []).reduce((s, v) => s + (v.montant || 0), 0)
 
-  const aaPlacer = Math.max(0, (parseFloat(salaire) || 0) - totalFixes)
+  const compteCourant = parseFloat(repartition.compte_courant) || 0
+  const aaPlacer = Math.max(0, (parseFloat(salaire) || 0) - totalFixes - compteCourant)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -29,10 +30,11 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
       const data = await apiFetch(`/api/monthly?annee=${annee}&mois=${mois}`)
       setSalaire(data.salaire != null ? String(data.salaire) : '')
       setRepartition({
-        pea: data.repartition?.pea ?? 0,
-        livret_a: data.repartition?.livret_a ?? 0,
-        cto: data.repartition?.cto ?? 0,
-        crypto: data.repartition?.crypto ?? 0,
+        pea:            data.repartition?.pea            ?? 0,
+        livret_a:       data.repartition?.livret_a       ?? 0,
+        cto:            data.repartition?.cto            ?? 0,
+        crypto:         data.repartition?.crypto         ?? 0,
+        compte_courant: data.repartition?.compte_courant ?? 100,
       })
     } catch {
       setSalaire('')
@@ -96,15 +98,17 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
     for (const v of (virementsFixesData || [])) {
       list.push({ libelle: v.libelle, banque: v.banque, montant: v.montant })
     }
-    const s = parseFloat(salaire) || 0
-    const placeable = Math.max(0, s - totalFixes)
+    // Compte courant — montant mensuel variable
+    if (compteCourant > 0) {
+      list.push({ libelle: 'Compte courant', banque: '—', montant: compteCourant })
+    }
     for (const key of PLACEMENTS_KEYS) {
       const pct = repartition[key] || 0
       if (pct > 0) {
         list.push({
           libelle: PLACEMENTS_LABELS[key],
           banque: '—',
-          montant: Math.round(placeable * pct / 100),
+          montant: Math.round(aaPlacer * pct / 100),
         })
       }
     }
@@ -166,8 +170,25 @@ export function SaisieTab({ annee, mois, onMonthChange, virementsFixesData, prel
         <div>
           <p className="card-title">Étape 2 — Répartition des placements</p>
           <div className="alert alert-info" style={{ marginBottom: 12 }}>
-            {fmt(parseFloat(salaire) || 0)} − {fmt(totalFixes)} fixes = <strong>{fmt(aaPlacer)}</strong> à placer
+            {fmt(parseFloat(salaire) || 0)} − {fmt(totalFixes)} fixes − {fmt(compteCourant)} CC = <strong>{fmt(aaPlacer)}</strong> à placer
           </div>
+
+          {/* Compte courant — montant mensuel variable */}
+          <div className="slider-row" style={{ marginBottom: 12 }}>
+            <span className="slider-label">Compte courant</span>
+            <div className="input-suffix" style={{ flex: 1 }}>
+              <input
+                type="number"
+                min="0"
+                step="10"
+                value={repartition.compte_courant}
+                onChange={e => setRepartition(r => ({ ...r, compte_courant: Number(e.target.value) }))}
+                style={{ textAlign: 'right' }}
+              />
+              <span>€</span>
+            </div>
+          </div>
+
           {PLACEMENTS_KEYS.map(key => (
             <div className="slider-row" key={key}>
               <span className="slider-label">{PLACEMENTS_LABELS[key]}</span>

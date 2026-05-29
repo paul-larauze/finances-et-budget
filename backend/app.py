@@ -290,10 +290,11 @@ def get_monthly():
     return jsonify({
         "salaire": salaire,
         "repartition": {
-            "pea": rep["pea"] if rep else 1.0,
-            "livret_a": rep["livret_a"] if rep else 0.0,
-            "cto": rep["cto"] if rep else 0.0,
-            "crypto": rep["crypto"] if rep else 0.0,
+            "pea":            rep["pea"]            if rep else 1.0,
+            "livret_a":       rep["livret_a"]       if rep else 0.0,
+            "cto":            rep["cto"]            if rep else 0.0,
+            "crypto":         rep["crypto"]         if rep else 0.0,
+            "compte_courant": rep["compte_courant"] if rep else 100.0,
         },
         "total_fixes": total_fixes,
         "disponible": salaire - total_fixes,
@@ -316,10 +317,12 @@ def save_monthly():
         (uid, annee, mois, salaire),
     )
     c.execute(
-        "INSERT INTO repartition (user_id, annee, mois, pea, livret_a, cto, crypto) VALUES (?,?,?,?,?,?,?) "
+        "INSERT INTO repartition (user_id, annee, mois, pea, livret_a, cto, crypto, compte_courant) "
+        "VALUES (?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id, annee, mois) DO UPDATE SET pea=excluded.pea, livret_a=excluded.livret_a, "
-        "cto=excluded.cto, crypto=excluded.crypto",
-        (uid, annee, mois, rep["pea"], rep["livret_a"], rep["cto"], rep["crypto"]),
+        "cto=excluded.cto, crypto=excluded.crypto, compte_courant=excluded.compte_courant",
+        (uid, annee, mois, rep["pea"], rep["livret_a"], rep["cto"], rep["crypto"],
+         rep.get("compte_courant", 100)),
     )
     conn.commit()
     conn.close()
