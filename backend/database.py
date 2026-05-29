@@ -196,6 +196,20 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN data_owner_id INTEGER")
         conn.commit()
 
+    # ── MIGRATION: virement fixe "Compte courant" (100 € par défaut) ─────────────
+    for row in c.execute("SELECT id FROM users").fetchall():
+        uid = row[0]
+        exists = c.execute(
+            "SELECT 1 FROM virements_fixes WHERE user_id=? AND libelle=?",
+            (uid, "Compte courant"),
+        ).fetchone()
+        if not exists:
+            c.execute(
+                "INSERT INTO virements_fixes (user_id, libelle, banque, montant) VALUES (?,?,?,?)",
+                (uid, "Compte courant", "—", 100),
+            )
+    conn.commit()
+
     # ── DATA TABLES ──────────────────────────────────────────────────────────────
     c.executescript("""
     CREATE TABLE IF NOT EXISTS monthly_entries (
@@ -437,6 +451,12 @@ def seed_new_user(conn, user_id):
             "INSERT OR IGNORE INTO categorization_rules (user_id, keyword, category) VALUES (?,?,?)",
             [(user_id, k, v) for k, v in DEFAULT_RULES],
         )
+
+    # Virement fixe "Compte courant" par défaut
+    c.execute(
+        "INSERT OR IGNORE INTO virements_fixes (user_id, libelle, banque, montant) VALUES (?,?,?,?)",
+        (user_id, "Compte courant", "—", 100),
+    )
 
     c.execute("SELECT COUNT(*) FROM supports WHERE user_id=?", (user_id,))
     if c.fetchone()[0] == 0:
