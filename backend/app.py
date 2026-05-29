@@ -1211,6 +1211,93 @@ def remap_categories():
     return jsonify({"ok": True, "updated": updated})
 
 
+@app.route("/api/users", methods=["GET"])
+@login_required
+def list_users_for_sharing():
+    conn = get_db()
+    users = conn.execute(
+        "SELECT id, username FROM users WHERE id != ? ORDER BY username",
+        (g.user_id,),
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(u) for u in users])
+
+
+@app.route("/api/categories/import-from/<int:owner_id>", methods=["POST"])
+@login_required
+def import_categories_from(owner_id):
+    uid = g.user_id
+    if owner_id == uid:
+        return jsonify({"error": "Impossible d'importer depuis votre propre compte"}), 400
+
+    conn = get_db()
+
+    # Verify owner exists
+    owner = conn.execute("SELECT id FROM users WHERE id=?", (owner_id,)).fetchone()
+    if not owner:
+        conn.close()
+        return jsonify({"error": "Utilisateur introuvable"}), 404
+
+    # Load source categories
+    src_parents = conn.execute(
+        "SELECT * FROM categories WHERE user_id=? AND parent_id IS NULL ORDER BY position, id",
+        (owner_id,),
+    ).fetchall()
+    src_children = conn.execute(
+        "SELECT * FROM categories WHERE user_id=? AND parent_id IS NOT NULL ORDER BY position, id",
+        (owner_id,),
+    ).fetchall()
+
+    children_by_src_parent = {}
+    for ch in src_children:
+        children_by_src_parent.setdefault(ch["parent_id"], []).append(ch)
+
+    added_parents = 0
+    added_subs = 0
+
+    for src_p in src_parents:
+        # Check if a parent with the same name already exists for uid
+        existing = conn.execute(
+            "SELECT id FROM categories WHERE user_id=? AND parent_id IS NULL AND nom=?",
+            (uid, src_p["nom"]),
+        ).fetchone()
+
+        if existing:
+            dest_parent_id = existing["id"]
+        else:
+            max_pos = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM categories WHERE user_id=? AND parent_id IS NULL",
+                (uid,),
+            ).fetchone()[0]
+            cur = conn.execute(
+                "INSERT INTO categories (user_id, parent_id, nom, position) VALUES (?,?,?,?)",
+                (uid, None, src_p["nom"], max_pos + 1),
+            )
+            dest_parent_id = cur.lastrowid
+            added_parents += 1
+
+        for src_ch in children_by_src_parent.get(src_p["id"], []):
+            already = conn.execute(
+                "SELECT id FROM categories WHERE user_id=? AND parent_id=? AND nom=?",
+                (uid, dest_parent_id, src_ch["nom"]),
+            ).fetchone()
+            if already:
+                continue
+            max_pos = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM categories WHERE user_id=? AND parent_id=?",
+                (uid, dest_parent_id),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO categories (user_id, parent_id, nom, position) VALUES (?,?,?,?)",
+                (uid, dest_parent_id, src_ch["nom"], max_pos + 1),
+            )
+            added_subs += 1
+
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "added_parents": added_parents, "added_subs": added_subs})
+
+
 @app.route("/api/categorization-rules", methods=["GET"])
 @login_required
 def get_rules():

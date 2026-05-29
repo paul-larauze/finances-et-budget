@@ -315,6 +315,97 @@ function MigrationPanel({ categories, toast }) {
   )
 }
 
+function ImportPanel({ onImported, toast }) {
+  const [open, setOpen] = useState(false)
+  const [users, setUsers] = useState([])
+  const [selectedUid, setSelectedUid] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  const toggle = async () => {
+    if (!open && users.length === 0) {
+      try {
+        const data = await apiFetch('/api/users')
+        setUsers(data)
+        if (data.length > 0) setSelectedUid(String(data[0].id))
+      } catch {
+        toast('Erreur de chargement des utilisateurs', 'error')
+        return
+      }
+    }
+    setOpen(v => !v)
+  }
+
+  const doImport = async () => {
+    if (!selectedUid) return
+    setImporting(true)
+    try {
+      const res = await apiFetch(`/api/categories/import-from/${selectedUid}`, { method: 'POST' })
+      const total = res.added_parents + res.added_subs
+      toast(
+        total === 0
+          ? 'Aucune nouvelle catégorie à importer (toutes existent déjà)'
+          : `Import terminé : ${res.added_parents} catégorie(s) et ${res.added_subs} sous-catégorie(s) ajoutée(s)`,
+        total === 0 ? 'info' : 'success',
+      )
+      if (total > 0) onImported()
+      setOpen(false)
+    } catch {
+      toast("Erreur lors de l'import", 'error')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <button
+        onClick={toggle}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', padding: '12px 14px', background: 'none', border: 'none',
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <span style={{ fontWeight: 600, fontSize: 14 }}>Importer les catégories d'un autre utilisateur</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+          {users.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Aucun autre utilisateur disponible.</p>
+          ) : (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>
+                Les catégories et sous-catégories seront copiées dans votre espace. Les doublons (même nom) sont ignorés.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select
+                  value={selectedUid}
+                  onChange={e => setSelectedUid(e.target.value)}
+                  style={{ flex: 1, fontSize: 13, padding: '6px 8px', height: 36, borderRadius: 8, border: '1px solid var(--border)' }}
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.username}</option>
+                  ))}
+                </select>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={doImport}
+                  disabled={importing || !selectedUid}
+                  style={{ height: 36, padding: '0 16px', fontSize: 13 }}
+                >
+                  {importing ? 'Import…' : 'Importer'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CategoriesView() {
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
@@ -448,6 +539,8 @@ export function CategoriesView() {
       ))}
 
       <MigrationPanel categories={categories} toast={toast} />
+
+      <ImportPanel onImported={load} toast={toast} />
 
       {/* Add parent category */}
       <div className="card">

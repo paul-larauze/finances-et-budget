@@ -5,6 +5,7 @@
       "name": "finances-et-budget",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/pauldelarauze/Documents/finances-et-budget/frontend",
       "port": 5173
     }
   ]
